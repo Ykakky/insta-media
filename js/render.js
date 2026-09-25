@@ -144,6 +144,22 @@ function clampWindow(win, photo) {
   win.offsetY = clamp(win.offsetY, -pl.maxY, pl.maxY);
 }
 
+// 枠だけを rect に変える。中の写真は画面上の同じ位置・大きさに残し、はみ出す分は切り取る（cover のまま）。
+// 枠が写真より大きくなるときだけ、覆えるところまで写真を大きくする。歪めることはない。
+// snap … 操作を始めたときの { inner, zoom, ox, oy }（ドラッグ中に誤差がたまらないように）。省略すると今の状態
+function reframeWindow(win, rect, photo, snap) {
+  snap = snap || { inner: innerRect(win), zoom: win.zoom, ox: win.offsetX, oy: win.offsetY };
+  win.free = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+  if (!photo) return;
+  const inner0 = snap.inner, inner1 = innerRect(win);
+  const absScale = coverScale(expandRect(inner0, CONFIG.BLEED), photo) * snap.zoom;
+  const cx = inner0.x + inner0.w / 2 + snap.ox, cy = inner0.y + inner0.h / 2 + snap.oy; // 写真の中心
+  win.zoom = absScale / coverScale(expandRect(inner1, CONFIG.BLEED), photo);
+  win.offsetX = cx - (inner1.x + inner1.w / 2);
+  win.offsetY = cy - (inner1.y + inner1.h / 2);
+  clampWindow(win, photo);
+}
+
 // 写真を入れ直した窓を初期状態に整える
 function fitWindow(win, photos) {
   const photo = photos[win.photo];
@@ -274,7 +290,7 @@ function pruneToneCache(post, photos) {
 }
 
 // ---------- 編集画面用の補助線 ----------
-// view: { frame, selected, grid, handles, ghost }
+// view: { frame, selected, grid, handles, ghost, seams }
 // cssPx: 画面1css pxあたりの台紙px
 
 function drawGuides(ctx, post, view, cssPx) {
@@ -322,6 +338,25 @@ function drawGuides(ctx, post, view, cssPx) {
     ctx.strokeRect(r.x + px(1.5), r.y + px(1.5), r.w - px(3), r.h - px(3));
   }
 
+  // 継ぎ目のバー（左右にドラッグして境目を動かす）
+  for (const sm of view.seams || []) {
+    const b = seamBar(sm, cssPx);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.45)';
+    ctx.shadowBlur = px(4);
+    ctx.fillStyle = '#fff';
+    roundRectPath(ctx, b.x, b.y, b.w, b.h, b.w / 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = '#4af';
+    ctx.lineWidth = px(1.5);
+    roundRectPath(ctx, b.x, b.y, b.w, b.h, b.w / 2);
+    ctx.stroke();
+    ctx.beginPath();
+    for (const dy of [-px(6), 0, px(6)]) { ctx.moveTo(b.x + px(3.5), b.y + b.h / 2 + dy); ctx.lineTo(b.x + b.w - px(3.5), b.y + b.h / 2 + dy); }
+    ctx.stroke();
+  }
+
   // 選択中の部品とつまみ
   if (view.selected) {
     const r = partRect(view.selected);
@@ -340,6 +375,22 @@ function drawGuides(ctx, post, view, cssPx) {
     }
   }
   ctx.restore();
+}
+
+// 継ぎ目のバーの矩形（台紙px）。cssPx は画面1css pxあたりの台紙px
+function seamBar(sm, cssPx) {
+  const w = 16 * cssPx, h = Math.min((sm.bottom - sm.top) * 0.4, 80 * cssPx);
+  return { x: sm.x - w / 2, y: (sm.top + sm.bottom) / 2 - h / 2, w, h };
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 // つまみの位置：0〜3 四隅（左上・右上・左下・右下）、4〜7 辺の中央（上・下・左・右）

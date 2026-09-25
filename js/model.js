@@ -127,18 +127,90 @@ const CASSETTES = {
   bleedRight:  { label: '右に切れる', span: 1, clip: true, rect: { x: 472.5, y: 135, w: 945, h: 1080 } },
 };
 
-// 写真 win をコマ f に置き方 key で置く。コマが足りなければ末尾に足す。
-// 他の写真・他のコマの中身は一切変えない。返り値：{ ok } か { error }
-function applyCassette(post, win, f, key) {
+// 写真 win をコマ f に置き方 key で置く。他の写真の中身（写真・寄せ・色調）は変えない。
+//  ・1コマの置き方：その写真の枠を決めるだけ
+//  ・複数コマの置き方：右へ伸ばし、重なる写真に場所を空けさせる（makeRoom）。コマが足りなければ足す
+// photos は隣の写真の枠を狭めるときに使う（cover のまま切り取るため）。返り値：{ ok } か { error }
+function applyCassette(post, win, f, key, photos) {
   const c = CASSETTES[key];
-  const need = f + c.span;
-  if (need > CONFIG.GRID.MAX_FRAMES) return { error: `コマは${CONFIG.GRID.MAX_FRAMES}コマまでです。` };
-  while (post.n < need) { post.frameBg.push(post.frameBg[post.n - 1] || CONFIG.BG.DEFAULT); post.n++; }
-  const r = c.rect;
-  win.free = { x: f * FW + r.x, y: r.y, w: r.w, h: r.h };
-  win.cassette = key;
-  win.clip = !!c.clip;
+  const before = JSON.stringify(post);
+  if (c.span > 1) {
+    // 継ぎ目を動かした後などで、写真がこのコマの途中から始まっていれば左端はそのまま。右へ伸ばす
+    const r0 = partRect(win), fl = f * FW;
+    const midStart = r0.y === 0 && r0.h === FH && r0.x > fl && r0.x < fl + FW - CONFIG.EDIT.MIN_KEEP_W;
+    const left = midStart ? r0.x : fl;
+    win.free = { x: left, y: 0, w: (f + c.span) * FW - left, h: FH };
+    win.cassette = key;
+    win.clip = false;
+    makeRoom(post, win, photos || []);
+  } else {
+    const r = c.rect;
+    win.free = { x: f * FW + r.x, y: r.y, w: r.w, h: r.h };
+    win.cassette = key;
+    win.clip = !!c.clip;
+  }
+  const r = partRect(win);
+  while (post.n * FW < r.x + r.w - 0.5) { post.frameBg.push(post.frameBg[post.n - 1] || CONFIG.BG.DEFAULT); post.n++; }
+  if (post.n > CONFIG.GRID.MAX_FRAMES) {
+    Object.assign(post, JSON.parse(before)); // 元に戻す（win は別物になるので、呼び出し側は id で選び直す）
+    return { error: `コマは${CONFIG.GRID.MAX_FRAMES}コマまでです。` };
+  }
   return { ok: true };
+}
+
+// 写真 P と重なる写真に場所を空けさせる。重なりは残さず、写真を消しもしない
+//  ・左から掛かっている写真：右端を P の左端まで詰める
+//  ・右に掛かっている写真：残りが MIN_KEEP_W 以上なら左端を P の右端まで詰める（枠だけ狭め、中身は cover のまま切り取る）
+//                          足りなければ、その写真のコマから後ろを必要なコマ数だけ後ろへ送る（コマを挿入）
+function makeRoom(post, P, photos) {
+  const MIN = CONFIG.EDIT.MIN_KEEP_W, done = new Set();
+  for (let guard = 0; guard < 100; guard++) {
+    const r = partRect(P);
+    const q = post.parts
+      .filter(o => o !== P && o.type === 'window' && !done.has(o) && rectsOverlap(partRect(o), r))
+      .sort((a, b) => partRect(a).x - partRect(b).x)[0];
+    if (!q) return;
+    const qr = partRect(q), pr = r.x + r.w, qrR = qr.x + qr.w;
+    if (qr.x < r.x) {
+      reframeWindow(q, { ...qr, w: Math.max(CONFIG.EDIT.MIN_FREE_SIZE, r.x - qr.x) }, photos[q.photo]);
+      q.cassette = null;
+      done.add(q);
+    } else if (qrR - pr >= MIN) {
+      reframeWindow(q, { x: pr, y: qr.y, w: qrR - pr, h: qr.h }, photos[q.photo]);
+      q.cassette = null;
+    } else {
+      const at = homeFrame(post, q);
+      insertFramesAt(post, at, Math.ceil((pr - qr.x) / FW - 1e-6), [P], post.frameBg[Math.max(0, at - 1)]);
+    }
+  }
+}
+
+// at 番目の位置に k コマ挿入し、at 以降に属する部品を後ろへ送る（exclude の部品は動かさない）
+function insertFramesAt(post, at, k, exclude = [], bg) {
+  const home = new Map(post.parts.map(p => [p, homeFrame(post, p)]));
+  for (const p of post.parts) if (!exclude.includes(p) && home.get(p) >= at) shiftPart(p, k);
+  post.frameBg.splice(at, 0, ...Array(k).fill(bg || CONFIG.BG.DEFAULT));
+  post.n += k;
+}
+
+// 継ぎ目：左右に隣り合う写真の境目のうち、複数コマにわたる写真に接するもの（または途中に動かしたもの）
+// { left, right, x, top, bottom } の配列
+function findSeams(post) {
+  const wins = post.parts.filter(p => p.type === 'window');
+  const seams = [];
+  for (const a of wins) {
+    const ar = partRect(a);
+    for (const b of wins) {
+      if (a === b) continue;
+      const br = partRect(b);
+      if (Math.abs(ar.x + ar.w - br.x) > 0.75) continue;
+      const top = Math.max(ar.y, br.y), bottom = Math.min(ar.y + ar.h, br.y + br.h);
+      if (bottom - top < 60) continue;
+      const offFrameEdge = Math.abs(br.x / FW - Math.round(br.x / FW)) * FW > 0.75;
+      if (ar.w > FW + 0.75 || br.w > FW + 0.75 || offFrameEdge) seams.push({ left: a, right: b, x: br.x, top, bottom });
+    }
+  }
+  return seams;
 }
 
 // ---------- 写真の割り当て ----------
@@ -166,31 +238,6 @@ function buildFromPhotos(photoCount) {
     post.parts.push(w);
   }
   return post;
-}
-
-// 振り直し：写真の割り当てを入れ替える（同じ写真だった枠どうしは同じ写真のまま）
-function shufflePhotos(post, photoCount) {
-  if (photoCount < 2) return [];
-  let perm;
-  for (let t = 0; t < 10; t++) {
-    perm = shuffle([...Array(photoCount).keys()]);
-    if (perm.some((v, i) => v !== i)) break;
-  }
-  const changed = [];
-  for (const p of post.parts) {
-    if (p.type !== 'window') continue;
-    const np = perm[p.photo % photoCount];
-    if (np !== p.photo) { p.photo = np; changed.push(p); }
-  }
-  return changed;
-}
-
-function shuffle(a) {
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
 }
 
 // map[旧番号] = 新番号（削除された写真は -1）。削除された写真の枠は、残りの写真で埋める

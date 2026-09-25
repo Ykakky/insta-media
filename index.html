@@ -46,12 +46,22 @@
 
 <!-- 2. 編集：上に拡大表示、その下にアイコン、さらに下にツールボックス。画面の高さに収める -->
 <section id="screen-editor" class="screen editor">
+  <div class="board-bar">
+    <button id="undo-btn" class="sub" disabled>↶ 戻す</button>
+    <div class="seg view-seg" id="view-seg">
+      <button data-view="normal">通常</button>
+      <button data-view="wide">縮小</button>
+      <button data-view="all">全体</button>
+    </div>
+  </div>
   <div id="board-wrap" class="board-wrap">
     <canvas id="board"></canvas>
     <button id="frame-prev" class="frame-nav prev" aria-label="前のコマ">‹</button>
     <button id="frame-next" class="frame-nav next" aria-label="次のコマ">›</button>
     <span class="sel-info" id="sel-info"></span>
   </div>
+  <!-- 縮小表示のときだけ：全体の縮小図。タップした場所へ表示が移る -->
+  <div id="minimap-wrap" class="minimap-wrap" hidden><canvas id="minimap"></canvas></div>
 
   <div class="tool-icons" id="tool-icons">
     <button data-tool="layout"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><rect x="6" y="7" width="7" height="10"/></svg>配置</button>
@@ -70,20 +80,16 @@
       <div id="pool" class="pool"></div>
       <input type="file" id="pool-input" accept="image/*" multiple hidden>
       <div class="btn-row">
-        <button id="add-window" class="sub">このコマに置く</button>
-        <button id="to-front" class="sub">前面へ</button>
-        <button id="del-part" class="sub">外す</button>
+        <button id="add-window" class="sub">新規配置</button>
+        <button id="del-part" class="sub">削除</button>
+      </div>
+      <div class="btn-row">
+        <button id="to-front" class="sub">前面へ移動</button>
+        <button id="to-back" class="sub">背面へ移動</button>
       </div>
       <div class="btn-row">
         <button id="add-frame" class="sub">後ろにコマ追加</button>
         <button id="del-frame" class="sub">コマを削除</button>
-        <button id="shuffle-btn" class="sub">振り直し</button>
-      </div>
-      <div class="label" id="styles-label">スタイル</div>
-      <div class="style-row" id="style-row"></div>
-      <div class="btn-row">
-        <button id="save-style" class="sub">今の状態をスタイルとして保存</button>
-        <button class="sub" data-open-styles>書き出し・読み込み</button>
       </div>
     </div>
 
@@ -154,6 +160,16 @@
   </div>
   <p class="hint">画像を長押し →「"写真"に保存」。</p>
   <div id="export-list"></div>
+
+  <section class="panel">
+    <h2>スタイル</h2>
+    <p class="hint">配置（コマ数・各写真の位置・大きさ・置き方・中身の寄せ）と配色（基調色・色調・背景色）を保存します。写真と文字は保存しません。</p>
+    <div class="btn-row">
+      <button id="save-style" class="sub">スタイルとして保存</button>
+      <button class="sub" data-open-styles>書き出し・読み込み</button>
+    </div>
+    <p class="hint" id="style-save-msg"></p>
+  </section>
 </section>
 
 <!-- スタイルの一覧・書き出し・読み込み -->

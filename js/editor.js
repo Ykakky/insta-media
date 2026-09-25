@@ -38,14 +38,18 @@ const editor = {
     c.addEventListener('contextmenu', e => e.preventDefault());
     // iOSのページ拡大ジェスチャを抑止
     document.addEventListener('gesturestart', e => e.preventDefault());
+    this.initMinimap();
   },
 
-  // 表示範囲：選択中のコマを中心に、両隣が少し見える幅（1.2コマ分）
+  // 表示範囲（CONFIG.VIEWS）：通常＝1コマ、縮小＝2.5コマ、全体＝全コマ
+  //  通常は表示中のコマが真ん中、縮小は state.viewCenter（縮小図のタップで動く）が真ん中
   resize() {
     if (!state.post) return;
     const b = boardSize(state.post.n), FW = CONFIG.GRID.FRAME_W;
-    this.visW = Math.min(b.w, FW * 1.2);
-    this.x0 = clamp((state.frame + 0.5) * FW - this.visW / 2, 0, b.w - this.visW);
+    const v = CONFIG.VIEWS.find(x => x.id === state.view) || CONFIG.VIEWS[0];
+    this.visW = v.frames ? Math.min(b.w, FW * v.frames) : b.w;
+    const center = state.view === 'wide' ? state.viewCenter : (state.frame + 0.5) * FW;
+    this.x0 = clamp(center - this.visW / 2, 0, b.w - this.visW);
     const wrap = this.canvas.parentElement;
     // 横幅いっぱい。ただしツールボックスの場所を残すため、高さは画面の約半分まで
     const maxH = Math.max(240, window.innerHeight * CONFIG.EDIT.BOARD_MAX_H);
@@ -79,7 +83,46 @@ const editor = {
       grid: state.grid,
       handles: textTool ? 'lr' : !gw,
       ghost: gw && state.photos[gw.photo] ? { win: gw, photo: state.photos[gw.photo] } : null,
+      seams: textTool ? [] : findSeams(state.post),
     }, this.unitsPerCss());
+    if (state.view === 'wide') this.drawMinimap();
+  },
+
+  // ---------- 縮小図（縮小表示のとき、台紙の下に全体を出す。タップした場所へ表示が移る） ----------
+
+  initMinimap() {
+    const mm = $('minimap');
+    const go = e => {
+      const r = mm.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width * boardSize(state.post.n).w;
+      state.viewCenter = x;
+      state.frame = frameAt(state.post.n, x);
+      state.selected = null;
+      updateEditorUI();
+      this.resize();
+    };
+    let down = false;
+    mm.addEventListener('pointerdown', e => { down = true; try { mm.setPointerCapture(e.pointerId); } catch (_) {} go(e); });
+    mm.addEventListener('pointermove', e => { if (down) go(e); });
+    mm.addEventListener('pointerup', () => { down = false; });
+    mm.addEventListener('pointercancel', () => { down = false; });
+  },
+
+  drawMinimap() {
+    const mm = $('minimap'), b = boardSize(state.post.n);
+    const cssW = mm.parentElement.clientWidth, cssH = cssW * b.h / b.w;
+    const dpr = window.devicePixelRatio || 1;
+    mm.style.height = cssH + 'px';
+    if (mm.width !== Math.round(cssW * dpr)) { mm.width = Math.round(cssW * dpr); mm.height = Math.round(cssH * dpr); }
+    const ctx = mm.getContext('2d'), k = mm.width / b.w;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    drawPost(ctx, state.post, state.photos);
+    ctx.strokeStyle = 'rgba(128,128,128,.9)';
+    ctx.lineWidth = 1 / k;
+    for (let f = 1; f < state.post.n; f++) { ctx.beginPath(); ctx.moveTo(f * CONFIG.GRID.FRAME_W, 0); ctx.lineTo(f * CONFIG.GRID.FRAME_W, b.h); ctx.stroke(); }
+    ctx.strokeStyle = '#fc3';
+    ctx.lineWidth = 2.5 / k;
+    ctx.strokeRect(this.x0 + 1.25 / k, 1.25 / k, this.visW - 2.5 / k, b.h - 2.5 / k);
   },
 
   // ---------- 座標 ----------
@@ -111,6 +154,11 @@ const editor = {
     const g = this.gesture;
     if (!g) return;
     const moved = g.start && Math.hypot(p.cx - g.start.cx, p.cy - g.start.cy) > CONFIG.EDIT.TAP_SLOP;
+    // 実際に形が変わる操作の最初の一歩で、「ひとつ戻る」用に今の状態を控える
+    if (!g.recorded && (['move', 'resize', 'scale', 'pan', 'seam'].includes(g.type) || (g.type === 'handle' && moved))) {
+      g.recorded = true;
+      pushHistory();
+    }
     switch (g.type) {
       case 'pending': if (moved) { this.cancelPress(); this.promote(g, p); } break;
       case 'handle':  if (moved) { this.cancelPress(); g.type = 'resize'; this.resizePart(g, p); } break;
@@ -118,6 +166,7 @@ const editor = {
       case 'resize':  this.resizePart(g, p); break;
       case 'scale':   this.pinchPart(g); break;
       case 'pan':     this.panPhoto(g); break;
+      case 'seam':    this.moveSeam(g, p); break;
     }
   },
 
@@ -140,6 +189,14 @@ const editor = {
 
   beginSingle(p) {
     const sel = state.selected;
+    if (state.tool !== 'text' && state.poolPick == null) {
+      const sm = this.seamAt(p);
+      if (sm) {
+        const L = sm.left, R = sm.right;
+        this.gesture = { type: 'seam', start: p, sm, snapL: this.snapshot(L), snapR: this.snapshot(R) };
+        return;
+      }
+    }
     if (sel && state.poolPick == null) {
       const only = sel.type === 'text' ? [6, 7] : null;
       const h = this.handleAt(sel, p, only);
@@ -191,7 +248,7 @@ const editor = {
     if (state.poolPick != null && hit && hit.type === 'window') putPhoto(hit, state.poolPick);
     select(hit, p);
     // 隣のコマをタップしたら、そのコマを中心に
-    if (state.frame !== prev) this.resize();
+    if (state.frame !== prev && state.view === 'normal') this.resize();
   },
 
   // ---------- 長押し：中の写真だけ動かす ----------
@@ -307,18 +364,36 @@ const editor = {
   // 枠だけ変える。中の写真は画面上の同じ位置・大きさに残す
   // （枠が写真より大きくなるときだけ、覆えるところまで写真を大きくする）
   cropTo(part, g, r) {
-    part.free = roundRect(r);
     part.cassette = null;
-    const photo = part.type === 'window' && state.photos[part.photo];
-    if (photo) {
-      const inner0 = g.inner, inner1 = innerRect(part);
-      const absScale = coverScale(expandRect(inner0, CONFIG.BLEED), photo) * g.zoom;
-      const cx = inner0.x + inner0.w / 2 + g.ox, cy = inner0.y + inner0.h / 2 + g.oy; // 写真の中心
-      part.zoom = absScale / coverScale(expandRect(inner1, CONFIG.BLEED), photo);
-      part.offsetX = cx - (inner1.x + inner1.w / 2);
-      part.offsetY = cy - (inner1.y + inner1.h / 2);
-    }
+    if (part.type === 'window') reframeWindow(part, roundRect(r), state.photos[part.photo], g);
+    else part.free = roundRect(r);
     this.afterReshape(part);
+  },
+
+  // ---------- 継ぎ目：左右の写真の境目をバーで動かす ----------
+
+  seamAt(p) {
+    const u = this.unitsPerCss();
+    for (const sm of findSeams(state.post)) {
+      const b = seamBar(sm, u);
+      const padX = Math.max(0, CONFIG.EDIT.HANDLE_HIT * u - b.w / 2), padY = 14 * u;
+      if (p.x >= b.x - padX && p.x <= b.x + b.w + padX && p.y >= b.y - padY && p.y <= b.y + b.h + padY) return sm;
+    }
+    return null;
+  },
+
+  // 境目を動かすと、両側の写真の枠幅が変わる。中の写真は縦横比を保ち、切り取られる量だけが変わる
+  moveSeam(g, p) {
+    const { left: L, right: R } = g.sm, a = g.snapL.rect, b = g.snapR.rect;
+    const min = CONFIG.EDIT.MIN_FREE_SIZE;
+    let x = clamp(p.x, a.x + min, b.x + b.w - min);
+    const s = this.nearest(x, this.snapLines().xs);
+    if (s != null && s >= a.x + min && s <= b.x + b.w - min) x = s;
+    x = Math.round(x * 2) / 2;
+    reframeWindow(L, { x: a.x, y: a.y, w: x - a.x, h: a.h }, state.photos[L.photo], g.snapL);
+    reframeWindow(R, { x, y: b.y, w: b.x + b.w - x, h: b.h }, state.photos[R.photo], g.snapR);
+    L.cassette = R.cassette = null;
+    this.requestDraw();
   },
 
   afterReshape(part) {

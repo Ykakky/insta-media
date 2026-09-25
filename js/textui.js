@@ -13,6 +13,7 @@ function selectedText() {
 function addTextButton() {
   const T = CONFIG.TYPE, fr = frameRect(state.frame);
   const w = Math.round(fr.w * T.defaultWidth);
+  pushHistory();
   const t = makeText({ x: fr.x + Math.round((fr.w - w) / 2), y: Math.round(fr.h * 0.1), w });
   state.post.parts.push(t);
   select(t);
@@ -44,7 +45,7 @@ function renderTextPanel() {
   if (document.activeElement !== input) input.value = t.text;
   $('text-count').textContent = `${Array.from(t.text).length} / ${T.maxChars}`;
 
-  const update = patch => { Object.assign(t, patch); loadFontFor(t); renderTextPanel(); editor.requestDraw(); };
+  const update = patch => { pushHistory(); Object.assign(t, patch); loadFontFor(t); renderTextPanel(); editor.requestDraw(); };
   renderSeg('text-family', T.families, t.family, id => update({ family: id }));
   renderSeg('text-weight', T.weights, t.weight, id => update({ weight: id }));
   $('text-italic').classList.toggle('on', t.italic);
@@ -68,6 +69,7 @@ function initTextPanel() {
   $('text-italic').addEventListener('click', () => {
     const t = selectedText();
     if (!t) return;
+    pushHistory();
     t.italic = !t.italic;
     loadFontFor(t);
     renderTextPanel();
@@ -76,6 +78,7 @@ function initTextPanel() {
   $('text-input').addEventListener('input', e => {
     const t = selectedText();
     if (!t) return;
+    pushHistory('text:' + t.id); // 打ち続けている間は1回分
     // 絵文字なども1文字として数えて切る
     const chars = Array.from(e.target.value).slice(0, CONFIG.TYPE.maxChars);
     t.text = chars.join('');

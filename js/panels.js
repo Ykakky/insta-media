@@ -34,8 +34,14 @@ function renderCassetteRow() {
       const win = cassetteTarget();
       if (!win) return;
       const n0 = state.post.n;
-      const res = applyCassette(state.post, win, state.frame, key);
-      if (res.error) { alert(res.error); return; }
+      pushHistory();
+      const res = applyCassette(state.post, win, state.frame, key, state.photos);
+      if (res.error) {
+        undoLog.stack.pop(); updateUndoButton(); // 何も変わっていないので控えも捨てる
+        state.selected = state.post.parts.find(p => p.id === win.id) || null;
+        alert(res.error);
+        return;
+      }
       fitWindow(win, state.photos);
       state.selected = win;
       updateEditorUI();
@@ -124,6 +130,7 @@ function renderStyleRow(row, list, inEditor) {
 
 function applyStyleItem(st) {
   if (state.post && !confirm(`スタイル「${st.name}」を当てはめますか？\n今の配置・色調・背景色は置き換わります（文字は残ります）。`)) return;
+  pushHistory();
   const texts = state.post ? state.post.parts.filter(p => p.type === 'text') : [];
   startWithPost(postFromStyle(st, texts));
 }
@@ -134,22 +141,24 @@ function saveStyleButton() {
   const def = `${n}枚・${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
   const name = prompt('スタイルの名前', def);
   if (name == null) return;
-  const ok = addStyle(postToStyle(state.post, n, name.trim() || def));
-  if (!ok) alert('保存できませんでした（このブラウザでは保存領域が使えない可能性があります。プライベートブラウズでは保存できません）。');
-  renderLayoutBox();
+  const saved = name.trim() || def;
+  const ok = addStyle(postToStyle(state.post, n, saved));
+  $('style-save-msg').textContent = ok
+    ? `「${saved}」を保存しました（${n}枚用）。写真画面の一覧から当てはめられます。`
+    : '保存できませんでした（このブラウザでは保存領域が使えない可能性があります。プライベートブラウズでは保存できません）。';
+  refreshStyleRows();
 }
 
 function renderLayoutBox() {
-  const s = state.selected, n = state.post.n, cnt = state.photos.length;
+  const s = state.selected, n = state.post.n;
   renderCassetteRow();
   renderPool();
-  $('add-window').textContent = state.poolPick != null ? `写真${state.poolPick + 1}をこのコマに置く` : 'このコマに写真を置く';
+  $('add-window').textContent = state.poolPick != null ? `新規配置（写真${state.poolPick + 1}）` : '新規配置';
   $('to-front').disabled = !s;
+  $('to-back').disabled = !s;
   $('del-part').disabled = !s;
   $('add-frame').disabled = n >= CONFIG.GRID.MAX_FRAMES;
   $('del-frame').disabled = n <= CONFIG.GRID.MIN_FRAMES;
-  $('styles-label').textContent = `スタイル（${cnt}枚用）— タップで当てはめ`;
-  renderStyleRow($('style-row'), stylesFor(cnt), true);
 }
 
 // ---------- 色調（写真ごと）と基調色（投稿全体） ----------
@@ -195,6 +204,8 @@ function renderTonePanel() {
 
 // 基調色を変える：単色系の写真と、基調色の文字が一斉に変わる（背景色は変わらない）
 function setAccent(id) {
+  if (id === state.post.accent) return;
+  pushHistory();
   state.post.accent = id;
   pruneToneCache(state.post, state.photos);
   renderTonePanel();
@@ -203,6 +214,7 @@ function setAccent(id) {
 
 function setTone(win, patch) {
   if (!win) return;
+  pushHistory();
   win.tone = { ...win.tone, ...patch };
   pruneToneCache(state.post, state.photos);
   renderTonePanel();
@@ -212,6 +224,7 @@ function setTone(win, patch) {
 function applyToneToAll() {
   const win = state.selected;
   if (!win || win.type !== 'window') return;
+  pushHistory();
   for (const p of state.post.parts) if (p.type === 'window') p.tone = { ...win.tone };
   pruneToneCache(state.post, state.photos);
   renderTonePanel();
@@ -253,6 +266,8 @@ function renderBgPanel(fromSlider) {
 }
 
 function setBg(color, fromSlider) {
+  // スライダーを動かし続けている間は1回分として控える
+  pushHistory(fromSlider ? 'bg:' + (state.selected ? state.selected.id : 'frame' + state.frame) : null);
   bgTarget().set(color);
   renderBgPanel(fromSlider);
   editor.requestDraw();
@@ -269,29 +284,28 @@ function renderGridBox() {
 function initToolbox() {
   $('add-window').addEventListener('click', addPhotoHere);
   $('to-front').addEventListener('click', bringToFront);
+  $('to-back').addEventListener('click', sendToBack);
   $('del-part').addEventListener('click', deleteSelected);
   $('add-frame').addEventListener('click', () => {
-    if (!addFrameAfter(state.post, state.frame)) return;
+    if (state.post.n >= CONFIG.GRID.MAX_FRAMES) return;
+    pushHistory();
+    addFrameAfter(state.post, state.frame);
     goFrame(state.frame + 1);
   });
   $('del-frame').addEventListener('click', () => {
+    if (state.post.n <= CONFIG.GRID.MIN_FRAMES) return;
     if (!confirm(`コマ${state.frame + 1}を削除しますか？（このコマの写真と文字も消えます）`)) return;
-    if (!deleteFrame(state.post, state.frame)) return;
+    pushHistory();
+    deleteFrame(state.post, state.frame);
     pruneToneCache(state.post, state.photos);
     goFrame(Math.min(state.frame, state.post.n - 1));
   });
-  $('shuffle-btn').addEventListener('click', () => {
-    shufflePhotos(state.post, state.photos.length).forEach(w => fitWindow(w, state.photos));
-    pruneToneCache(state.post, state.photos);
-    updateEditorUI();
-    editor.requestDraw();
-  });
-  $('save-style').addEventListener('click', saveStyleButton);
   $('tone-all').addEventListener('click', applyToneToAll);
   for (const id of ['bg-h', 'bg-s', 'bg-l']) {
     $(id).addEventListener('input', () => setBg(hslToHex(+$('bg-h').value, +$('bg-s').value, +$('bg-l').value), true));
   }
   $('bg-all').addEventListener('click', () => {
+    pushHistory();
     const c = bgTarget().get();
     state.post.frameBg = state.post.frameBg.map(() => c);
     editor.requestDraw();

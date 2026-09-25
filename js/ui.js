@@ -10,6 +10,8 @@ const state = {
   post: null,
   tool: 'layout',   // ツールボックス：'layout' | 'tone' | 'bg' | 'text' | 'grid'
   grid: false,      // グリッドを表示（表示中はグリッド線に吸着）
+  view: 'normal',   // 表示倍率：'normal' 1コマ | 'wide' 2.5コマ＋縮図 | 'all' 全コマ（CONFIG.VIEWS）
+  viewCenter: 540,  // 縮小表示のときの表示の中心（台紙px）
   frame: 0,         // 表示中のコマ
   selected: null,   // 選択中の部品（窓・ベタ・文字）。画面上は窓を「写真」と呼ぶ
   poolPick: null,   // プールで持っている写真の番号
@@ -24,6 +26,49 @@ function el(tag, props = {}, children = []) {
   Object.assign(e, props);
   for (const c of children) e.append(c);
   return e;
+}
+
+// ---------- ひとつ戻る ----------
+// 変更の直前に投稿の状態を丸ごと写して積む（最大 CONFIG.EDIT.HISTORY 件）。
+// スライダーや文字入力のような続けざまの変更は、key が同じなら1回分にまとめる。
+
+const undoLog = { stack: [], key: null, at: 0 };
+
+function pushHistory(key) {
+  if (!state.post) return;
+  const now = Date.now();
+  if (key && key === undoLog.key && now - undoLog.at < 2000) { undoLog.at = now; return; }
+  undoLog.stack.push(JSON.stringify(state.post));
+  if (undoLog.stack.length > CONFIG.EDIT.HISTORY) undoLog.stack.shift();
+  undoLog.key = key || null;
+  undoLog.at = now;
+  updateUndoButton();
+}
+
+function clearHistory() {
+  undoLog.stack = [];
+  undoLog.key = null;
+  updateUndoButton();
+}
+
+function undo() {
+  if (!undoLog.stack.length) return;
+  const selId = state.selected && state.selected.id;
+  state.post = JSON.parse(undoLog.stack.pop());
+  undoLog.key = null;
+  state.selected = state.post.parts.find(p => p.id === selId) || null;
+  state.frame = Math.min(state.frame, state.post.n - 1);
+  pruneToneCache(state.post, state.photos);
+  updateUndoButton();
+  updateEditorUI();
+  editor.resize();
+}
+
+function updateUndoButton() {
+  const b = $('undo-btn');
+  if (!b) return;
+  b.disabled = !undoLog.stack.length;
+  b.textContent = undoLog.stack.length ? `↶ 戻す（${undoLog.stack.length}）` : '↶ 戻す';
 }
 
 // ---------- 段階の移動 ----------
@@ -90,6 +135,7 @@ function reorderPhotos(order) {
   order.forEach((oldIdx, newIdx) => { map[oldIdx] = newIdx; });
   state.photos = order.map(i => state.photos[i]);
   if (state.post) remapPhotos(state.post, map, state.photos.length);
+  clearHistory(); // 控えの写真番号が合わなくなるため
   renderOrderGrid();
 }
 
@@ -102,6 +148,7 @@ function removePhoto(idx) {
     lost.forEach(p => fitWindow(p, state.photos));
     pruneToneCache(state.post, state.photos);
   }
+  clearHistory();
   renderOrderGrid();
 }
 
@@ -183,7 +230,7 @@ function startWithPost(post) {
   state.post = post;
   state.post.parts.forEach(p => p.type === 'window' && state.photos[p.photo] && clampWindow(p, state.photos[p.photo]));
   pruneToneCache(state.post, state.photos);
-  Object.assign(state, { frame: 0, tool: 'layout' });
+  Object.assign(state, { frame: 0, tool: 'layout', viewCenter: CONFIG.GRID.FRAME_W / 2 });
   goStep('edit');
 }
 
@@ -204,6 +251,7 @@ function initPhotosScreen() {
 
   $('build-btn').addEventListener('click', () => {
     if (state.post && !confirm('この順で組み直すと、今の配置と文字は消えます。よろしいですか？')) return;
+    pushHistory();
     const accent = state.post ? state.post.accent : CONFIG.ACCENT_DEFAULT;
     const post = buildFromPhotos(Math.min(state.photos.length, CONFIG.GRID.MAX_FRAMES));
     post.accent = accent;
@@ -230,6 +278,7 @@ function dropEmptyText() {
 }
 
 function putPhoto(win, idx) {
+  pushHistory();
   win.photo = idx;
   fitWindow(win, state.photos);
   pruneToneCache(state.post, state.photos);
@@ -239,6 +288,7 @@ function putPhoto(win, idx) {
 
 // 表示中のコマに写真を1枚置く（持っている写真か、使われていない写真。置き方は「小・中央」）
 function addPhotoHere() {
+  pushHistory();
   const win = makeWindow({ free: { x: 0, y: 0, w: 1, h: 1 } });
   win.photo = state.poolPick != null ? state.poolPick : leastUsedPhoto(state.post, state.photos.length);
   applyCassette(state.post, win, state.frame, 'smallCenter');
@@ -257,6 +307,7 @@ function onEditChanged() {
 function deleteSelected() {
   const s = state.selected;
   if (!s) return;
+  pushHistory();
   state.post.parts = state.post.parts.filter(p => p !== s);
   state.selected = null;
   pruneToneCache(state.post, state.photos);
@@ -268,14 +319,24 @@ function deleteSelected() {
 function bringToFront() {
   const s = state.selected;
   if (!s) return;
+  pushHistory();
   state.post.parts = state.post.parts.filter(p => p !== s);
   state.post.parts.push(s);
+  editor.requestDraw();
+}
+
+function sendToBack() {
+  const s = state.selected;
+  if (!s) return;
+  pushHistory();
+  state.post.parts = [s, ...state.post.parts.filter(p => p !== s)];
   editor.requestDraw();
 }
 
 function goFrame(f) {
   dropEmptyText();
   state.frame = clamp(f, 0, state.post.n - 1);
+  state.viewCenter = (state.frame + 0.5) * CONFIG.GRID.FRAME_W;
   state.selected = null;
   updateEditorUI();
   editor.resize();
@@ -288,6 +349,10 @@ function updateEditorUI() {
   const s = state.selected, n = state.post.n;
   $('frame-prev').disabled = state.frame <= 0;
   $('frame-next').disabled = state.frame >= n - 1;
+  $('frame-prev').hidden = $('frame-next').hidden = state.view === 'all';
+  document.querySelectorAll('#view-seg button').forEach(b => b.classList.toggle('on', b.dataset.view === state.view));
+  $('minimap-wrap').hidden = state.view !== 'wide';
+  updateUndoButton();
   let info = `${state.frame + 1} / ${n}`;
   if (state.poolPick != null) info += `・写真${state.poolPick + 1}を持っています`;
   else if (s) info += { window: `・写真${s.photo + 1}`, beta: '・ベタ', text: '・文字' }[s.type];
@@ -312,11 +377,21 @@ function setTool(tool) {
   editor.requestDraw();
 }
 
+function setView(view) {
+  if (view === state.view) return;
+  state.view = view;
+  state.viewCenter = (state.frame + 0.5) * CONFIG.GRID.FRAME_W;
+  updateEditorUI();
+  editor.resize();
+}
+
 function initEditorScreen() {
   editor.init();
   $('frame-prev').addEventListener('click', () => goFrame(state.frame - 1));
   $('frame-next').addEventListener('click', () => goFrame(state.frame + 1));
   document.querySelectorAll('#tool-icons button').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  $('undo-btn').addEventListener('click', undo);
+  document.querySelectorAll('#view-seg button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
   $('pool-input').addEventListener('change', async e => {
     const room = CONFIG.PHOTO.MAX_COUNT - state.photos.length;
     const files = Array.from(e.target.files || []).slice(0, room);
@@ -370,6 +445,7 @@ async function runExport() {
 
 function initExportScreen() {
   $('export-back').addEventListener('click', () => goStep('edit'));
+  $('save-style').addEventListener('click', saveStyleButton);
   // 共有シート（「画像を保存」でまとめて写真アプリへ）
   $('share-btn').addEventListener('click', async () => {
     const files = state.exportBlobs.map((b, i) =>
