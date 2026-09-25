@@ -110,11 +110,20 @@ const editor = {
 
   drawMinimap() {
     const mm = $('minimap'), b = boardSize(state.post.n);
-    const cssW = mm.parentElement.clientWidth, cssH = cssW * b.h / b.w;
+    // 位置を示すだけのガイドなので小さく（画面幅の MINIMAP_SCALE）。ただしタップしやすい高さは残す
+    const full = mm.parentElement.clientWidth;
+    let cssW = full * CONFIG.EDIT.MINIMAP_SCALE;
+    if (cssW * b.h / b.w < CONFIG.EDIT.MINIMAP_MIN_H) cssW = Math.min(full, CONFIG.EDIT.MINIMAP_MIN_H * b.w / b.h);
+    const cssH = cssW * b.h / b.w;
     const dpr = window.devicePixelRatio || 1;
+    mm.style.width = cssW + 'px';
     mm.style.height = cssH + 'px';
-    if (mm.width !== Math.round(cssW * dpr)) { mm.width = Math.round(cssW * dpr); mm.height = Math.round(cssH * dpr); }
+    if (mm.width !== Math.round(cssW * dpr) || mm.height !== Math.round(cssH * dpr)) {
+      mm.width = Math.round(cssW * dpr); mm.height = Math.round(cssH * dpr);
+    }
     const ctx = mm.getContext('2d'), k = mm.width / b.w;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, mm.width, mm.height); // コマ数が変わっても前の絵を残さない
     ctx.setTransform(k, 0, 0, k, 0, 0);
     drawPost(ctx, state.post, state.photos);
     ctx.strokeStyle = 'rgba(128,128,128,.9)';

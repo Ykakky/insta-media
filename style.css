@@ -208,4 +208,4 @@ textarea.json { font: 12px/1.4 ui-monospace, Menlo, monospace; }
 .view-seg { flex: 1; margin: 0; padding: 3px; }
 .view-seg button { padding: 6px 0; font-size: 13px; }
 .minimap-wrap { flex: 0 0 auto; margin-top: 6px; }
-#minimap { display: block; width: 100%; touch-action: none; border-radius: 4px; background: #000; }
+#minimap { display: block; margin: 0 auto; touch-action: none; border-radius: 3px; background: #000; }
