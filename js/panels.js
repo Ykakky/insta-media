@@ -1,68 +1,158 @@
 // ============================================================
-// コマ編集の操作欄：写真の色調・背景色・配置・カセット（常時表示）
-// タブで切り替えず、1画面に並べる。カセットは画面下に常に並ぶ。
+// ツールボックス：配置・色調・背景・グリッド（文字は textui.js）
+// どれも「選択中の写真1枚」か「表示中のコマ」だけを変える。
 // ============================================================
 
-// ---------- カセット（画面下に常時。タップで即適用） ----------
-
-function renderCassetteDock() {
-  const dock = $('cassette-dock');
-  dock.innerHTML = '';
-  const items = [];
-  for (const [key, c] of Object.entries(CASSETTES)) for (const span of c.spans) items.push({ key, span, label: c.label });
-  items.sort((a, b) => a.span - b.span);
-  for (const it of items) {
-    const fits = state.mode === 'free' || cassetteFitsGrid(it.key, it.span);
-    const label = it.label + (it.span > 1 ? `（${it.span}コマ）` : '');
-    const b = el('button', { className: 'cas', disabled: !fits, title: fits ? label : 'マス設計では使えません（写真が重なるため）' },
-      [cassetteThumb(it.key, it.span), el('span', { textContent: label })]);
-    b.addEventListener('click', () => {
-      const res = applyCassette(state.post, state.frame, it.key, it.span, state.photos.length);
-      if (res.error) { alert(res.error); return; }
-      res.added.forEach(p => p.type === 'window' && fitWindow(p, state.photos));
-      state.selected = null;
-      pruneToneCache(state.post, state.photos);
-      renderPool();
-      updateEditorUI();
-      editor.resize(); // コマ数が変わることがある
-    });
-    dock.appendChild(b);
+function renderToolbox() {
+  switch (state.tool) {
+    case 'layout': renderLayoutBox(); break;
+    case 'tone':   renderTonePanel(); break;
+    case 'bg':     renderBgPanel(); break;
+    case 'grid':   renderGridBox(); break;
   }
 }
 
-// カセットの形を線画のSVGで描く（build の結果をそのまま図にする）
-function cassetteThumb(key, span) {
+// ---------- 配置：置き方（写真1枚ずつ） ----------
+
+// 置き方を当てる写真：選択中の写真。なければ、表示中のコマに写真が1枚だけならそれ
+function cassetteTarget() {
+  const s = state.selected;
+  if (s && s.type === 'window') return s;
+  const here = state.post.parts.filter(p => p.type === 'window' && homeFrame(state.post, p) === state.frame);
+  return here.length === 1 ? here[0] : null;
+}
+
+function renderCassetteRow() {
+  const row = $('cas-row');
+  row.innerHTML = '';
+  const target = cassetteTarget();
+  $('cas-label').textContent = target ? `置き方（写真${target.photo + 1}）` : '置き方 — 写真をタップして選んでください';
+  for (const [key, c] of Object.entries(CASSETTES)) {
+    const b = el('button', { className: 'cas' + (target && target.cassette === key ? ' on' : ''), disabled: !target },
+      [cassetteThumb(key), el('span', { textContent: c.label })]);
+    b.addEventListener('click', () => {
+      const win = cassetteTarget();
+      if (!win) return;
+      const n0 = state.post.n;
+      const res = applyCassette(state.post, win, state.frame, key);
+      if (res.error) { alert(res.error); return; }
+      fitWindow(win, state.photos);
+      state.selected = win;
+      updateEditorUI();
+      if (state.post.n !== n0) editor.resize(); else editor.requestDraw();
+    });
+    row.appendChild(b);
+  }
+}
+
+// 置き方の線画：コマの枠と、写真の位置（切れる部分は点線）
+function cassetteThumb(key) {
   const NS = 'http://www.w3.org/2000/svg';
-  const W = CONFIG.GRID.FRAME_W * span, H = CONFIG.GRID.FRAME_H;
-  const { parts } = CASSETTES[key].build(0, span);
+  const c = CASSETTES[key], FW = CONFIG.GRID.FRAME_W, FH = CONFIG.GRID.FRAME_H;
+  const W = FW * c.span, pad = 60;
   const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', `-20 -20 ${W + 40} ${H + 40}`);
-  const add = (tag, attrs) => {
-    const e = document.createElementNS(NS, tag);
+  svg.setAttribute('viewBox', `${-pad} ${-pad} ${W + pad * 2} ${FH + pad * 2}`);
+  const add = attrs => {
+    const e = document.createElementNS(NS, attrs.tag || 'rect');
+    delete attrs.tag;
     for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
     svg.appendChild(e);
   };
-  add('rect', { x: 0, y: 0, width: W, height: H, fill: '#2a2a2a', stroke: '#888', 'stroke-width': 10 });
-  for (const p of parts) {
-    const r = partRect(p);
-    if (p.type === 'beta') {
-      add('rect', { x: r.x, y: r.y, width: r.w, height: r.h, fill: '#000', stroke: '#888', 'stroke-width': 10 });
-      continue;
-    }
-    add('rect', { x: r.x, y: r.y, width: r.w, height: r.h, fill: '#3d4d5c',
-      stroke: p.border ? '#fff' : '#9cf', 'stroke-width': p.border ? 30 : 18 });
-    add('path', { d: `M${r.x} ${r.y + r.h}L${r.x + r.w * 0.4} ${r.y + r.h * 0.45}L${r.x + r.w * 0.6} ${r.y + r.h * 0.7}L${r.x + r.w * 0.8} ${r.y + r.h * 0.5}L${r.x + r.w} ${r.y + r.h * 0.75}`,
-      fill: 'none', stroke: '#9cf', 'stroke-width': 14 });
-  }
-  // コマの境目は最後に重ねる
-  for (let i = 1; i < span; i++) {
-    const x = i * CONFIG.GRID.FRAME_W;
-    add('line', { x1: x, y1: -20, x2: x, y2: H + 20, stroke: '#fc3', 'stroke-width': 18, 'stroke-dasharray': '60 40' });
+  for (let f = 0; f < c.span; f++) add({ x: f * FW, y: 0, width: FW, height: FH, fill: '#2a2a2a', stroke: '#888', 'stroke-width': 16 });
+  const r = c.rect;
+  if (c.clip) {
+    add({ x: r.x, y: r.y, width: r.w, height: r.h, fill: 'none', stroke: '#9cf', 'stroke-width': 14, 'stroke-dasharray': '40 30' });
+    const x = Math.max(0, r.x), x2 = Math.min(FW, r.x + r.w);
+    add({ x, y: r.y, width: x2 - x, height: r.h, fill: '#3d5a75', stroke: '#9cf', 'stroke-width': 22 });
+  } else {
+    add({ x: r.x, y: r.y, width: r.w, height: r.h, fill: '#3d5a75', stroke: '#9cf', 'stroke-width': 22 });
   }
   return svg;
 }
 
-// ---------- 写真の色調（写真ごと）と基調色（投稿全体） ----------
+// ---------- 配置：写真プール ----------
+
+function renderPool() {
+  const pool = $('pool');
+  pool.innerHTML = '';
+  const use = state.post ? photoUsage(state.post, state.photos.length) : [];
+  state.photos.forEach((ph, i) => {
+    // 番号を表示。どこにも置かれていない写真は薄く
+    const b = el('button', { className: 'thumb' + (state.poolPick === i ? ' on' : '') + (use[i] ? '' : ' unused') }, [
+      el('img', { src: ph.thumb, alt: `写真${i + 1}` }),
+      el('span', { className: 'badge', textContent: `${i + 1}` }),
+    ]);
+    b.addEventListener('click', () => {
+      state.poolPick = state.poolPick === i ? null : i;
+      updateEditorUI();
+    });
+    pool.appendChild(b);
+  });
+  if (state.photos.length < CONFIG.PHOTO.MAX_COUNT) {
+    const add = el('button', { className: 'add', textContent: '＋', title: '写真を読み込む' });
+    add.addEventListener('click', () => $('pool-input').click());
+    pool.appendChild(add);
+  }
+}
+
+// ---------- 配置：スタイル ----------
+
+// list をサムネイルで並べる。inEditor なら削除ボタンも付ける（初期プリセットは削除できない）
+function renderStyleRow(row, list, inEditor) {
+  row.innerHTML = '';
+  if (!list.length) {
+    row.appendChild(el('span', { className: 'hint', textContent: 'この枚数のスタイルはまだありません。' }));
+    return;
+  }
+  for (const st of list) {
+    const b = el('button', { className: 'style-item' }, [styleThumb(st), el('span', { textContent: st.name })]);
+    if (st.preset) b.appendChild(el('i', { className: 'preset-badge', textContent: '初期' }));
+    b.addEventListener('click', () => applyStyleItem(st));
+    const wrap = el('div', { className: 'style-wrap' }, [b]);
+    if (inEditor && !st.preset) {
+      const del = el('button', { className: 'style-del', textContent: '×', ariaLabel: `${st.name}を削除` });
+      del.addEventListener('click', () => {
+        if (!confirm(`スタイル「${st.name}」を削除しますか？`)) return;
+        removeStyle(st.id);
+        renderLayoutBox();
+      });
+      wrap.appendChild(del);
+    }
+    row.appendChild(wrap);
+  }
+}
+
+function applyStyleItem(st) {
+  if (state.post && !confirm(`スタイル「${st.name}」を当てはめますか？\n今の配置・色調・背景色は置き換わります（文字は残ります）。`)) return;
+  const texts = state.post ? state.post.parts.filter(p => p.type === 'text') : [];
+  startWithPost(postFromStyle(st, texts));
+}
+
+function saveStyleButton() {
+  const n = state.photos.length;
+  const d = new Date();
+  const def = `${n}枚・${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const name = prompt('スタイルの名前', def);
+  if (name == null) return;
+  const ok = addStyle(postToStyle(state.post, n, name.trim() || def));
+  if (!ok) alert('保存できませんでした（このブラウザでは保存領域が使えない可能性があります。プライベートブラウズでは保存できません）。');
+  renderLayoutBox();
+}
+
+function renderLayoutBox() {
+  const s = state.selected, n = state.post.n, cnt = state.photos.length;
+  renderCassetteRow();
+  renderPool();
+  $('add-window').textContent = state.poolPick != null ? `写真${state.poolPick + 1}をこのコマに置く` : 'このコマに写真を置く';
+  $('to-front').disabled = !s;
+  $('del-part').disabled = !s;
+  $('add-frame').disabled = n >= CONFIG.GRID.MAX_FRAMES;
+  $('del-frame').disabled = n <= CONFIG.GRID.MIN_FRAMES;
+  $('styles-label').textContent = `スタイル（${cnt}枚用）— タップで当てはめ`;
+  renderStyleRow($('style-row'), stylesFor(cnt), true);
+}
+
+// ---------- 色調（写真ごと）と基調色（投稿全体） ----------
 
 function renderTonePanel() {
   const post = state.post, s = state.selected;
@@ -128,8 +218,8 @@ function applyToneToAll() {
   editor.requestDraw();
 }
 
-// ---------- 背景色（基調色とは独立。色見本＋色相・彩度・明度） ----------
-// 対象：ベタを選んでいればそのベタ、なければ選択中のコマの背景
+// ---------- 背景色（コマごと。基調色とは独立） ----------
+// 対象：ベタを選んでいればそのベタ、なければ表示中のコマの背景
 
 function bgTarget() {
   const s = state.selected;
@@ -168,92 +258,36 @@ function setBg(color, fromSlider) {
   editor.requestDraw();
 }
 
-// ---------- 配置 ----------
+// ---------- グリッド ----------
 
-function setMode(mode) {
-  if (mode === state.mode) return;
-  if (mode === 'grid') {
-    const drop = snapAllToGrid(state.post, true);
-    if (drop.length && !confirm(`マスに合わせると重なる写真が${drop.length}枚あります。外してマス設計にしますか？`)) return;
-    snapAllToGrid(state.post);
-    state.post.parts.forEach(p => {
-      if (p.type !== 'window') return;
-      if (p.align) fitWindow(p, state.photos);
-      else if (state.photos[p.photo]) clampWindow(p, state.photos[p.photo]);
-    });
-    if (state.selected && !state.post.parts.includes(state.selected)) state.selected = null;
-    pruneToneCache(state.post, state.photos);
-    renderPool();
-  }
-  state.mode = mode;
-  renderCassetteDock();
-  updateEditorUI();
-  editor.requestDraw();
+function renderGridBox() {
+  document.querySelectorAll('#grid-seg button').forEach(b => b.classList.toggle('on', (b.dataset.grid === 'on') === state.grid));
 }
 
-// 「写真を置く」：選択中のコマに1マス分
-function addWindowButton() {
-  const f = state.frame, C = CONFIG.GRID.COLS;
-  if (state.mode === 'grid') {
-    for (let row = 0; row < CONFIG.GRID.ROWS; row++)
-      for (let col = f * C; col < (f + 1) * C; col++) {
-        const span = { col, row, cols: 1, rows: 1 };
-        if (!gridBlocked(state.post, span, null)) { addWindow(span); return; }
-      }
-    alert('このコマに空いているマスがありません。');
-    return;
-  }
-  const c = cellSize(), fr = frameRect(f);
-  addWindow({ free: roundRect({ x: fr.x + (fr.w - c.w) / 2, y: (fr.h - c.h) / 2, w: c.w, h: c.h }) });
-}
+// ---------- 初期化 ----------
 
-function addFrameButton() {
-  const added = addFrameAfter(state.post, state.frame, state.photos.length);
-  if (!added.length) { alert(`コマは${CONFIG.GRID.MAX_FRAMES}コマまでです。`); return; }
-  added.forEach(p => p.type === 'window' && fitWindow(p, state.photos));
-  goFrame(state.frame + 1);
-  renderPool();
-}
-
-function deleteFrameButton() {
-  if (state.post.n <= CONFIG.GRID.MIN_FRAMES) return;
-  if (!confirm(`コマ${state.frame + 1}を削除しますか？（このコマの写真・ベタ・文字も消えます）`)) return;
-  const added = deleteFrame(state.post, state.frame, state.photos.length);
-  added.forEach(p => p.type === 'window' && fitWindow(p, state.photos));
-  pruneToneCache(state.post, state.photos);
-  goFrame(Math.min(state.frame, state.post.n - 1));
-  renderPool();
-}
-
-// ---------- 表示の更新・初期化 ----------
-
-function renderLayoutPanels() {
-  const s = state.selected, n = state.post.n;
-  renderTonePanel();
-  renderBgPanel();
-  document.querySelectorAll('#mode-seg button').forEach(b => b.classList.toggle('on', b.dataset.mode === state.mode));
-  $('add-frame').disabled = n >= CONFIG.GRID.MAX_FRAMES;
-  $('del-frame').disabled = n <= CONFIG.GRID.MIN_FRAMES;
-  $('del-part').disabled = !s;
-  $('to-front').disabled = !s || state.mode === 'grid';
-}
-
-function initLayoutPanels() {
-  renderCassetteDock();
-  document.querySelectorAll('#mode-seg button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
-  $('add-window').addEventListener('click', addWindowButton);
+function initToolbox() {
+  $('add-window').addEventListener('click', addPhotoHere);
   $('to-front').addEventListener('click', bringToFront);
   $('del-part').addEventListener('click', deleteSelected);
-  $('add-frame').addEventListener('click', addFrameButton);
-  $('del-frame').addEventListener('click', deleteFrameButton);
-  $('tone-all').addEventListener('click', applyToneToAll);
+  $('add-frame').addEventListener('click', () => {
+    if (!addFrameAfter(state.post, state.frame)) return;
+    goFrame(state.frame + 1);
+  });
+  $('del-frame').addEventListener('click', () => {
+    if (!confirm(`コマ${state.frame + 1}を削除しますか？（このコマの写真と文字も消えます）`)) return;
+    if (!deleteFrame(state.post, state.frame)) return;
+    pruneToneCache(state.post, state.photos);
+    goFrame(Math.min(state.frame, state.post.n - 1));
+  });
   $('shuffle-btn').addEventListener('click', () => {
     shufflePhotos(state.post, state.photos.length).forEach(w => fitWindow(w, state.photos));
     pruneToneCache(state.post, state.photos);
-    renderPool();
     updateEditorUI();
     editor.requestDraw();
   });
+  $('save-style').addEventListener('click', saveStyleButton);
+  $('tone-all').addEventListener('click', applyToneToAll);
   for (const id of ['bg-h', 'bg-s', 'bg-l']) {
     $(id).addEventListener('input', () => setBg(hslToHex(+$('bg-h').value, +$('bg-s').value, +$('bg-l').value), true));
   }
@@ -262,4 +296,9 @@ function initLayoutPanels() {
     state.post.frameBg = state.post.frameBg.map(() => c);
     editor.requestDraw();
   });
+  document.querySelectorAll('#grid-seg button').forEach(b => b.addEventListener('click', () => {
+    state.grid = b.dataset.grid === 'on';
+    renderGridBox();
+    editor.requestDraw();
+  }));
 }

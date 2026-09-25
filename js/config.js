@@ -48,6 +48,7 @@ const CONFIG = {
     SNAP: 8,             // コマの端・グリッド線に吸着する距離（画面css px）
     TAP_SLOP: 8,         // これ以下の移動はタップ扱い（画面css px）
     LONG_PRESS_MS: 450,  // 長押しで「中の写真だけ動かす」に入るまでの時間
+    BOARD_MAX_H: 0.52,   // 編集画面で台紙が使う高さの上限（画面の高さに対する割合）
   },
 
   // 基調色：投稿全体で1色。写真の色調（単色系）と文字色に使う。
@@ -146,88 +147,6 @@ const CONFIG = {
       { id: '#5bb8e0', label: '水色' },
       { id: '#e98aa8', label: '桃' },
       { id: '#8a8a8a', label: '灰' },
-    ],
-    defaultWidth: 0.8,            // 新しい文字の幅（コマ幅に対する割合）
-  },
-
-  // 背景色・ベタの色とは独立（BG を参照）。
-  //  photo … 写真に乗せる色（沈まないよう少し明るめ）
-  //  ink   … 文字・罫線に使う色
-  //  light … 淡い版（省略時は ink を白に ACCENT_LIGHT_MIX だけ混ぜて作る）
-  ACCENTS: [
-    { id: 'navy',   label: '濃紺',   photo: '#4b4f9e', ink: '#262a63' },
-    { id: 'ai',     label: '藍',     photo: '#3f6b96', ink: '#1f3b5f' },
-    { id: 'sky',    label: '水色',   photo: '#86c6e4', ink: '#3f8db3' },
-    { id: 'teal',   label: '青緑',   photo: '#4d9c98', ink: '#1f6a68' },
-    { id: 'forest', label: '深緑',   photo: '#4d7c5e', ink: '#1f4a34' },
-    { id: 'leaf',   label: '若草',   photo: '#a6c46a', ink: '#6e8f2f' },
-    { id: 'ochre',  label: '黄土',   photo: '#caa45a', ink: '#9c7427' },
-    { id: 'sepia',  label: 'セピア', photo: '#a67c55', ink: '#6b4a2e' },
-    { id: 'rust',   label: '赤茶',   photo: '#b8664a', ink: '#8a3b24' },
-    { id: 'enji',   label: '臙脂',   photo: '#a04858', ink: '#6e1f2e' },
-    { id: 'orange', label: '橙',     photo: '#ea9a58', ink: '#d0702a' },
-    { id: 'violet', label: '紫',     photo: '#8c6cab', ink: '#5a3a78' },
-    { id: 'gray',   label: '灰',     photo: '#8c8c8c', ink: '#555555' },
-    { id: 'black',  label: '黒',     photo: '#3c3c3c', ink: '#111111' },
-    { id: 'kinari', label: '生成り', photo: '#eadfc6', ink: '#cbbd9d', light: '#f5efe2' },
-  ],
-  ACCENT_DEFAULT: 'navy',
-  ACCENT_LIGHT_MIX: 0.16,
-
-  // 写真の色調（写真ごとに選ぶ）
-  //  none     … そのまま
-  //  pale     … 淡い：彩度を落とす（色は残す。基調色は乗せない）
-  //  duo      … 単色：モノクロに基調色を乗せる。暗い側ほど基調色、明るい側は白へ
-  //  paleDuo  … 淡い単色：単色の効きを弱めたもの
-  //  強さは 弱・標準・強 の3段階。値はここで差し替える
-  TONE: {
-    modes: [
-      { id: 'none',    label: 'そのまま' },
-      { id: 'pale',    label: '淡い' },
-      { id: 'duo',     label: '単色' },
-      { id: 'paleDuo', label: '淡い単色' },
-    ],
-    strengths: [
-      { id: 'weak',     label: '弱' },
-      { id: 'standard', label: '標準' },
-      { id: 'strong',   label: '強' },
-    ],
-    pale:    { weak: 0.3,  standard: 0.5,  strong: 0.7 },  // 彩度を落とす割合
-    duo:     { weak: 0.65, standard: 0.85, strong: 1.0 },  // 基調色の効き
-    paleDuo: { weak: 0.3,  standard: 0.42, strong: 0.55 },
-    duoHighlight: 1.6,  // 大きいほど明るい側が早く白に抜ける
-
-    // 第4段以降のトーン補正用（未使用）
-    exposure: 0,
-    contrast: 0,
-    saturation: 0,
-    shadowColor: '#000000',
-    highlightColor: '#ffffff',
-    strength: 'standard', // 'weak' | 'standard' | 'none'
-    strengthValues: { weak: 0.5, standard: 1.0, none: 0 },
-  },
-
-  // 書体（文字入れ）
-  //  級数はこの3種類のみ。数値は台紙px（1コマ幅1080）
-  //  和文フォントは Google Fonts から読み込む（unicode-range で分割配信され、
-  //  使う文字を含む断片だけが読み込まれる。入力した文字列そのものは送らない）
-  TYPE: {
-    jaFont: 'Noto Sans JP',
-    enFont: 'Helvetica Neue',
-    weight: 300,                  // Light
-    fontCss: 'https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap',
-    roles: [
-      { id: 'title', label: 'タイトル',   size: 64 },
-      { id: 'sub',   label: 'サブコピー', size: 40 },
-      { id: 'body',  label: '本文',       size: 30 },
-    ],
-    lineHeight: 2.0,              // 級数に対する倍率
-    letterSpacing: 0.04,          // em
-    maxChars: 150,
-    colors: [                     // 文字色：基調色・白・黒
-      { id: 'accent', label: '基調色' },
-      { id: 'white',  label: '白' },
-      { id: 'black',  label: '黒' },
     ],
     defaultWidth: 0.8,            // 新しい文字の幅（コマ幅に対する割合）
   },

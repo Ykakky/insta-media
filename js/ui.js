@@ -1,19 +1,18 @@
 // ============================================================
 // UI：画面の流れ・写真の並べ替え・編集画面の共通操作・書き出し
-//  流れ：写真を選んで並べる → この順で組む → コマ編集 → 文字入れ → 書き出し
-//  コマ編集の操作欄は panels.js、文字入れは textui.js、プレビューは preview.js
-//  台紙の上での指の操作は editor.js
+//  流れ：写真を選んで並べる → この順で組む → 編集（配置・色調・背景・文字・グリッド）→ 書き出し
+//  ツールボックスの中身は panels.js（配置・色調・背景・グリッド）と textui.js（文字）
+//  スタイルの保存は styles.js、プレビューは preview.js、台紙の上での指の操作は editor.js
 // ============================================================
 
 const state = {
   photos: [],       // loadPhoto の結果（＋thumb）。並び順＝組むときのコマ順
   post: null,
-  stage: 'layout',  // 編集画面の段階：'layout' コマ編集 | 'text' 文字入れ
-  mode: 'free',     // 'free' 自由設計 | 'grid' マス設計
-  frame: 0,         // 選択中のコマ
+  tool: 'layout',   // ツールボックス：'layout' | 'tone' | 'bg' | 'text' | 'grid'
+  grid: false,      // グリッドを表示（表示中はグリッド線に吸着）
+  frame: 0,         // 表示中のコマ
   selected: null,   // 選択中の部品（窓・ベタ・文字）。画面上は窓を「写真」と呼ぶ
-  poolPick: null,   // プールで選んでいる写真の番号
-  zoom: true,       // 拡大表示（1コマを画面幅いっぱいに）
+  poolPick: null,   // プールで持っている写真の番号
   exportBlobs: [],
   exportUrls: [],
 };
@@ -29,36 +28,30 @@ function el(tag, props = {}, children = []) {
 
 // ---------- 段階の移動 ----------
 
-// step: 'photos' | 'layout' | 'text' | 'export'
+// step: 'photos' | 'edit' | 'export'
 function goStep(step) {
   if (step !== 'photos' && !state.post) return;
+  dropEmptyText();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const screen = step === 'photos' ? 'photos' : step === 'export' ? 'export' : 'editor';
-  $('screen-' + screen).classList.add('active');
-  document.querySelectorAll('#steps button').forEach(b => {
+  $('screen-' + (step === 'edit' ? 'editor' : step)).classList.add('active');
+  document.body.classList.toggle('editing', step === 'edit');
+  document.querySelectorAll('#steps [data-step]').forEach(b => {
     b.classList.toggle('on', b.dataset.step === step);
     b.disabled = b.dataset.step !== 'photos' && !state.post;
   });
+  $('preview-btn').disabled = !state.post;
   window.scrollTo(0, 0);
   if (step === 'photos') renderOrderGrid();
-  if (step === 'layout' || step === 'text') enterStage(step);
+  if (step === 'edit') {
+    state.selected = null;
+    state.poolPick = null;
+    updateEditorUI();
+    editor.resize();
+  }
   if (step === 'export') runExport();
 }
 
-function enterStage(stage) {
-  dropEmptyText();
-  state.stage = stage;
-  state.selected = null;
-  state.poolPick = null;
-  document.querySelectorAll('#screen-editor [data-stage]').forEach(e => { e.hidden = e.dataset.stage !== stage; });
-  $('stage-title').textContent = stage === 'layout' ? 'コマ編集' : '文字入れ';
-  $('next-btn').textContent = stage === 'layout' ? '文字入れへ ›' : '完了 ›';
-  renderPool();
-  updateEditorUI();
-  editor.resize();
-}
-
-// ---------- 1〜2. 写真を選んで並べる ----------
+// ---------- 1. 写真を選んで並べる ----------
 
 async function loadInto(files, log) {
   const loaded = [];
@@ -131,6 +124,15 @@ function renderOrderGrid() {
   $('build-btn').disabled = n < 1;
   $('build-btn').textContent = state.post ? 'この順で組み直す' : 'この順で組む';
   $('back-to-edit').hidden = !state.post || n < 1;
+  renderPhotoStyles();
+}
+
+// 写真画面にも、同じ枚数のスタイルを並べる（タップでそのスタイルで組む）
+function renderPhotoStyles() {
+  const n = state.photos.length, list = n ? stylesFor(n) : [];
+  $('photo-styles-box').hidden = !list.length;
+  $('photo-styles-label').textContent = `保存したスタイルで組む（${n}枚用）`;
+  renderStyleRow($('photo-styles'), list, false);
 }
 
 function attachReorderDrag(cell, idx) {
@@ -176,6 +178,15 @@ function orderIndexAt(x, y) {
   return best;
 }
 
+// 新しい投稿で編集を始める
+function startWithPost(post) {
+  state.post = post;
+  state.post.parts.forEach(p => p.type === 'window' && state.photos[p.photo] && clampWindow(p, state.photos[p.photo]));
+  pruneToneCache(state.post, state.photos);
+  Object.assign(state, { frame: 0, tool: 'layout' });
+  goStep('edit');
+}
+
 function initPhotosScreen() {
   const log = $('load-log');
   $('file-input').addEventListener('change', async e => {
@@ -192,41 +203,14 @@ function initPhotosScreen() {
   });
 
   $('build-btn').addEventListener('click', () => {
-    if (state.post && !confirm('この順で組み直すと、コマの編集と文字は消えます。よろしいですか？')) return;
+    if (state.post && !confirm('この順で組み直すと、今の配置と文字は消えます。よろしいですか？')) return;
     const accent = state.post ? state.post.accent : CONFIG.ACCENT_DEFAULT;
-    state.post = buildFromPhotos(Math.min(state.photos.length, CONFIG.GRID.MAX_FRAMES));
-    state.post.accent = accent;
-    state.post.parts.forEach(p => fitWindow(p, state.photos));
-    Object.assign(state, { mode: 'free', frame: 0, zoom: true });
-    goStep('layout');
+    const post = buildFromPhotos(Math.min(state.photos.length, CONFIG.GRID.MAX_FRAMES));
+    post.accent = accent;
+    post.parts.forEach(p => fitWindow(p, state.photos));
+    startWithPost(post);
   });
-  $('back-to-edit').addEventListener('click', () => goStep('layout'));
-}
-
-// ---------- 編集画面：写真プール ----------
-
-function renderPool() {
-  const pool = $('pool');
-  pool.innerHTML = '';
-  const use = state.post ? photoUsage(state.post, state.photos.length) : [];
-  state.photos.forEach((ph, i) => {
-    // 番号を表示。どこにも置かれていない写真は薄く
-    const b = el('button', { className: 'thumb' + (state.poolPick === i ? ' on' : '') + (use[i] ? '' : ' unused') }, [
-      el('img', { src: ph.thumb, alt: `写真${i + 1}` }),
-      el('span', { className: 'badge', textContent: `${i + 1}` }),
-    ]);
-    b.addEventListener('click', () => {
-      state.poolPick = state.poolPick === i ? null : i;
-      renderPool();
-      updateEditorUI();
-    });
-    pool.appendChild(b);
-  });
-  if (state.photos.length < CONFIG.PHOTO.MAX_COUNT) {
-    const add = el('button', { className: 'add', textContent: '＋', title: '写真を読み込む' });
-    add.addEventListener('click', () => $('pool-input').click());
-    pool.appendChild(add);
-  }
+  $('back-to-edit').addEventListener('click', () => goStep('edit'));
 }
 
 // ---------- 編集画面：選択と部品の操作（editor.js からも呼ぶ） ----------
@@ -253,14 +237,15 @@ function putPhoto(win, idx) {
   editor.requestDraw();
 }
 
-// spec: { free } か { col,row,cols,rows }
-function addWindow(spec) {
-  const win = makeWindow(spec);
+// 表示中のコマに写真を1枚置く（持っている写真か、使われていない写真。置き方は「小・中央」）
+function addPhotoHere() {
+  const win = makeWindow({ free: { x: 0, y: 0, w: 1, h: 1 } });
   win.photo = state.poolPick != null ? state.poolPick : leastUsedPhoto(state.post, state.photos.length);
+  applyCassette(state.post, win, state.frame, 'smallCenter');
   state.post.parts.push(win);
   fitWindow(win, state.photos);
-  const r = partRect(win);
-  select(win, { x: r.x + r.w / 2 });
+  state.poolPick = null;
+  select(win);
   renderPool();
 }
 
@@ -303,38 +288,35 @@ function updateEditorUI() {
   const s = state.selected, n = state.post.n;
   $('frame-prev').disabled = state.frame <= 0;
   $('frame-next').disabled = state.frame >= n - 1;
-  $('zoom-toggle').textContent = state.zoom ? '全体' : '拡大';
-
-  let info = `コマ ${state.frame + 1} / ${n}`;
+  let info = `${state.frame + 1} / ${n}`;
   if (state.poolPick != null) info += `・写真${state.poolPick + 1}を持っています`;
   else if (s) info += { window: `・写真${s.photo + 1}`, beta: '・ベタ', text: '・文字' }[s.type];
   $('sel-info').textContent = info;
 
-  if (state.stage === 'layout') {
-    $('editor-hint').textContent =
-      state.poolPick != null ? '台紙の写真をタップすると、選んだ写真に差し替わります。もう一度プールの写真を押すと解除。'
-      : state.mode === 'grid'
-        ? 'マス設計：空いているマスをなぞると新しい写真。写真をドラッグで中身を動かし、ピンチで拡大縮小。'
-        : '自由設計：ドラッグで移動。ピンチか四隅で拡大縮小。辺の中央で切り取り方を変える。長押ししてからドラッグで中身だけ動かす。';
-    renderLayoutPanels();
-  } else {
-    $('editor-hint').textContent = '文字をドラッグで移動、左右のつまみで幅を変える。';
-    renderTextPanel();
-  }
+  document.querySelectorAll('#tool-icons button').forEach(b => b.classList.toggle('on', b.dataset.tool === state.tool));
+  document.querySelectorAll('#toolbox > [data-tool]').forEach(d => { d.hidden = d.dataset.tool !== state.tool; });
+  if (state.tool === 'text') renderTextPanel();
+  else renderToolbox();
+}
+
+function setTool(tool) {
+  if (tool === state.tool) return;
+  dropEmptyText();
+  // 文字ツールと写真のツールでは、触れる対象が違うので選択を外す
+  const toText = tool === 'text', fromText = state.tool === 'text';
+  if (toText !== fromText) state.selected = null;
+  state.tool = tool;
+  state.poolPick = null;
+  $('toolbox').scrollTop = 0;
+  updateEditorUI();
+  editor.requestDraw();
 }
 
 function initEditorScreen() {
   editor.init();
   $('frame-prev').addEventListener('click', () => goFrame(state.frame - 1));
   $('frame-next').addEventListener('click', () => goFrame(state.frame + 1));
-  $('zoom-toggle').addEventListener('click', () => {
-    state.zoom = !state.zoom;
-    updateEditorUI();
-    editor.resize();
-  });
-  $('next-btn').addEventListener('click', () => goStep(state.stage === 'layout' ? 'text' : 'export'));
-  $('preview-btn').addEventListener('click', openPreview);
-
+  document.querySelectorAll('#tool-icons button').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $('pool-input').addEventListener('change', async e => {
     const room = CONFIG.PHOTO.MAX_COUNT - state.photos.length;
     const files = Array.from(e.target.files || []).slice(0, room);
@@ -344,7 +326,7 @@ function initEditorScreen() {
   });
 }
 
-// ---------- 6. 書き出し ----------
+// ---------- 3. 書き出し ----------
 
 async function runExport() {
   const list = $('export-list');
@@ -387,7 +369,7 @@ async function runExport() {
 }
 
 function initExportScreen() {
-  $('export-back').addEventListener('click', () => goStep('text'));
+  $('export-back').addEventListener('click', () => goStep('edit'));
   // 共有シート（「画像を保存」でまとめて写真アプリへ）
   $('share-btn').addEventListener('click', async () => {
     const files = state.exportBlobs.map((b, i) =>
@@ -403,12 +385,14 @@ function initExportScreen() {
 // ---------- 起動 ----------
 
 function startApp() {
-  document.querySelectorAll('#steps button').forEach(b => b.addEventListener('click', () => goStep(b.dataset.step)));
+  document.querySelectorAll('#steps [data-step]').forEach(b => b.addEventListener('click', () => goStep(b.dataset.step)));
+  $('preview-btn').addEventListener('click', () => { dropEmptyText(); openPreview(); });
   // フォントが届いたら字幅を測り直して描き直す
   if (document.fonts) document.fonts.addEventListener('loadingdone', () => { clearTextLayout(); editor.requestDraw(); });
   initPhotosScreen();
   initEditorScreen();
-  initLayoutPanels();
+  initToolbox();
+  initStyleSheet();
   initTextPanel();
   initPreview();
   initExportScreen();

@@ -274,7 +274,7 @@ function pruneToneCache(post, photos) {
 }
 
 // ---------- 編集画面用の補助線 ----------
-// view: { frame, selected, grid, handles, trace: {span, ok}, draft }
+// view: { frame, selected, grid, handles, ghost }
 // cssPx: 画面1css pxあたりの台紙px
 
 function drawGuides(ctx, post, view, cssPx) {

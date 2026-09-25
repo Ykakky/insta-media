@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>カルーセル台紙</title>
-<!-- 和文フォント（Noto Sans JP Light）。unicode-range で分割され、使う文字を含む断片だけ読み込まれる -->
+<!-- 和文フォント（Noto Sans JP / Noto Serif JP。SIL OFL で商用利用可）。
+     unicode-range で分割され、使う文字を含む断片だけ読み込まれる。CONFIG.TYPE.fontCss と揃えること -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;700&family=Noto+Serif+JP:wght@300;700&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,12 +16,12 @@
 <!-- 段階（行き来できる） -->
 <nav class="steps" id="steps">
   <button data-step="photos">1 写真</button>
-  <button data-step="layout">2 編集</button>
-  <button data-step="text">3 文字</button>
-  <button data-step="export">4 書き出し</button>
+  <button data-step="edit">2 編集</button>
+  <button data-step="export">3 書き出し</button>
+  <button id="preview-btn" class="pv-btn" aria-label="プレビュー">プレビュー</button>
 </nav>
 
-<!-- 1〜2. 写真を選んで並べる -->
+<!-- 1. 写真を選んで並べる -->
 <section id="screen-photos" class="screen active">
   <h1>写真を選んで、並べる</h1>
   <p class="hint">選んだ順に並びます。ドラッグで入れ替えると、その順がカルーセルの順になります。</p>
@@ -29,6 +30,11 @@
     <input type="file" id="file-input" accept="image/*" multiple>
   </label>
   <div id="order-grid" class="order-grid"></div>
+  <div id="photo-styles-box" hidden>
+    <div class="label" id="photo-styles-label"></div>
+    <div class="style-row" id="photo-styles"></div>
+  </div>
+  <button class="link-btn" data-open-styles>スタイルの書き出し・読み込み</button>
   <div class="row sticky-bottom">
     <button id="back-to-edit" class="sub" hidden>編集に戻る</button>
     <button id="build-btn" disabled>この順で組む</button>
@@ -38,42 +44,62 @@
   </details>
 </section>
 
-<!-- 4〜5. コマごとの編集・文字入れ（台紙は共通） -->
-<section id="screen-editor" class="screen">
-  <div class="toolbar">
-    <span class="stage-title" id="stage-title"></span>
-    <button id="preview-btn" class="sub">プレビュー</button>
-    <button id="next-btn">次へ</button>
-  </div>
-
-  <!-- 写真プール（編集のみ）：タップで選んで、台紙の写真をタップで差し替え -->
-  <div id="pool" class="pool" data-stage="layout"></div>
-  <input type="file" id="pool-input" accept="image/*" multiple hidden>
-
-  <div id="board-wrap">
+<!-- 2. 編集：上に拡大表示、その下にアイコン、さらに下にツールボックス。画面の高さに収める -->
+<section id="screen-editor" class="screen editor">
+  <div id="board-wrap" class="board-wrap">
     <canvas id="board"></canvas>
-  </div>
-  <div class="view-bar">
-    <button id="frame-prev" class="sub" aria-label="前のコマ">‹</button>
+    <button id="frame-prev" class="frame-nav prev" aria-label="前のコマ">‹</button>
+    <button id="frame-next" class="frame-nav next" aria-label="次のコマ">›</button>
     <span class="sel-info" id="sel-info"></span>
-    <button id="frame-next" class="sub" aria-label="次のコマ">›</button>
-    <button id="zoom-toggle" class="sub">全体</button>
   </div>
-  <p class="hint" id="editor-hint"></p>
 
-  <!-- ===== コマ編集：写真の色調・背景色・配置を1画面に ===== -->
-  <div data-stage="layout">
-    <section class="panel">
-      <h2 id="tone-title">写真の色調</h2>
+  <div class="tool-icons" id="tool-icons">
+    <button data-tool="layout"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><rect x="6" y="7" width="7" height="10"/></svg>配置</button>
+    <button data-tool="tone"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" class="fill"/></svg>色調</button>
+    <button data-tool="bg"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1" class="fill"/><rect x="8" y="8" width="8" height="8" class="hole"/></svg>背景</button>
+    <button data-tool="text"><svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></svg>文字</button>
+    <button data-tool="grid"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/></svg>グリッド</button>
+  </div>
+
+  <div class="toolbox" id="toolbox">
+    <!-- 配置：写真の置き方（1枚ずつ）・写真の追加と差し替え・コマ・スタイル -->
+    <div data-tool="layout">
+      <div class="label" id="cas-label">置き方</div>
+      <div class="cas-row" id="cas-row"></div>
+      <div class="label">写真（タップで持つ → 台紙の写真をタップで差し替え）</div>
+      <div id="pool" class="pool"></div>
+      <input type="file" id="pool-input" accept="image/*" multiple hidden>
+      <div class="btn-row">
+        <button id="add-window" class="sub">このコマに置く</button>
+        <button id="to-front" class="sub">前面へ</button>
+        <button id="del-part" class="sub">外す</button>
+      </div>
+      <div class="btn-row">
+        <button id="add-frame" class="sub">後ろにコマ追加</button>
+        <button id="del-frame" class="sub">コマを削除</button>
+        <button id="shuffle-btn" class="sub">振り直し</button>
+      </div>
+      <div class="label" id="styles-label">スタイル</div>
+      <div class="style-row" id="style-row"></div>
+      <div class="btn-row">
+        <button id="save-style" class="sub">今の状態をスタイルとして保存</button>
+        <button class="sub" data-open-styles>書き出し・読み込み</button>
+      </div>
+    </div>
+
+    <!-- 色調：写真ごと。単色に乗る色は基調色（投稿全体） -->
+    <div data-tool="tone">
+      <div class="label" id="tone-title">写真の色調</div>
       <div class="chips" id="tone-chips"></div>
       <div class="chips small" id="strength-chips"></div>
       <div class="label">単色に乗せる色（基調色・投稿全体）</div>
       <div class="swatches" id="accent-swatches"></div>
       <div class="btn-row"><button id="tone-all" class="sub">この色調を全部の写真に</button></div>
-    </section>
+    </div>
 
-    <section class="panel">
-      <h2 id="bg-title">背景色</h2>
+    <!-- 背景：コマごと。基調色とは独立 -->
+    <div data-tool="bg">
+      <div class="label" id="bg-title">背景色</div>
       <div class="swatches" id="bg-swatches"></div>
       <div class="hsl">
         <label>色相<input type="range" id="bg-h" min="0" max="360"></label>
@@ -82,60 +108,89 @@
       </div>
       <div class="btn-row">
         <span class="hex" id="bg-hex"></span>
-        <button id="bg-all" class="sub">この色を全コマの背景に</button>
+        <button id="bg-all" class="sub">全コマをこの色に</button>
       </div>
-    </section>
+    </div>
 
-    <section class="panel">
-      <h2>配置</h2>
-      <div class="seg" id="mode-seg">
-        <button data-mode="free" class="on">自由設計</button>
-        <button data-mode="grid">マス設計</button>
+    <!-- 文字 -->
+    <div data-tool="text">
+      <div class="btn-row"><button id="add-text">このコマに文字を追加</button></div>
+      <div id="text-panel">
+        <textarea id="text-input" rows="2" placeholder="文字を入力"></textarea>
+        <div class="counter" id="text-count"></div>
+        <div class="seg" id="text-family"></div>
+        <div class="seg-line">
+          <div class="seg" id="text-weight"></div>
+          <button id="text-italic" class="toggle">斜体</button>
+        </div>
+        <div class="label">級数</div>
+        <div class="seg" id="text-role"></div>
+        <div class="label">行間</div>
+        <div class="seg" id="text-line"></div>
+        <div class="label">文字色</div>
+        <div class="swatches small" id="text-color"></div>
+        <div class="label">揃え</div>
+        <div class="seg" id="text-align"></div>
+        <div class="btn-row"><button id="del-text" class="sub">この文字を削除</button></div>
       </div>
-      <div class="btn-row">
-        <button id="add-window" class="sub">写真を置く</button>
-        <button id="to-front" class="sub">前面へ</button>
-        <button id="del-part" class="sub">選択を削除</button>
-      </div>
-      <div class="btn-row">
-        <button id="add-frame" class="sub">後ろにコマを追加</button>
-        <button id="del-frame" class="sub">このコマを削除</button>
-      </div>
-      <div class="btn-row">
-        <button id="shuffle-btn" class="sub">振り直し（写真の割り当てを入れ替え）</button>
-      </div>
-    </section>
+    </div>
 
-    <!-- カセット：常に画面下に並ぶ。タップで即適用（出発点のパターン） -->
-    <div class="cassette-dock" id="cassette-dock"></div>
-  </div>
-
-  <!-- ===== 文字入れ ===== -->
-  <div data-stage="text">
-    <div class="btn-row"><button id="add-text">文字を追加</button></div>
-    <section class="panel" id="text-panel">
-      <textarea id="text-input" rows="3" placeholder="文字を入力"></textarea>
-      <div class="counter" id="text-count"></div>
-      <div class="label">級数</div>
-      <div class="seg" id="text-role"></div>
-      <div class="label">文字色</div>
-      <div class="chips" id="text-color"></div>
-      <div class="label">揃え</div>
-      <div class="seg" id="text-align"></div>
-      <div class="btn-row"><button id="del-text" class="sub">この文字を削除</button></div>
-    </section>
+    <!-- グリッド -->
+    <div data-tool="grid">
+      <div class="seg" id="grid-seg">
+        <button data-grid="on">グリッドを表示</button>
+        <button data-grid="off">表示しない</button>
+      </div>
+      <p class="hint">表示中は、写真や文字をドラッグすると細かい正方形のグリッド線（1コマ 横16×縦20）に吸着します。表示しないときは自由に置けます（コマの端にだけ吸着）。重ね方に制限はありません。</p>
+    </div>
   </div>
 </section>
 
-<!-- 6. 書き出し -->
+<!-- 3. 書き出し -->
 <section id="screen-export" class="screen">
   <div class="toolbar">
-    <button id="export-back" class="sub">文字入れに戻る</button>
+    <button id="export-back" class="sub">編集に戻る</button>
     <button id="share-btn" class="sub">共有シート</button>
   </div>
   <p class="hint">画像を長押し →「"写真"に保存」。</p>
   <div id="export-list"></div>
 </section>
+
+<!-- スタイルの一覧・書き出し・読み込み -->
+<div id="style-sheet" class="sheet" hidden>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <button id="style-sheet-back" class="sub" hidden>‹ 一覧</button>
+      <span id="style-sheet-title">スタイル</span>
+      <button id="style-sheet-close" class="sub">閉じる</button>
+    </div>
+
+    <div data-view="list">
+      <div class="btn-row">
+        <button id="export-all-styles" class="sub">保存したものを全部書き出す</button>
+        <button id="open-import" class="sub">読み込む</button>
+      </div>
+      <div id="style-manage-list"></div>
+    </div>
+
+    <div data-view="export" hidden>
+      <p class="hint" id="export-note"></p>
+      <textarea id="style-json-out" class="json" rows="12" readonly></textarea>
+      <div class="btn-row">
+        <button id="copy-json">コピー</button>
+        <button id="download-json" class="sub">ファイルで保存</button>
+      </div>
+      <p class="hint" id="copy-msg"></p>
+    </div>
+
+    <div data-view="import" hidden>
+      <p class="hint">書き出したJSONを貼り付けて「読み込む」。今あるスタイルは消えずに追加されます。同じ名前があれば、末尾に番号を付けます。</p>
+      <textarea id="style-json-in" class="json" rows="12" placeholder="{ &quot;format&quot;: &quot;carousel-styles&quot;, ... }"></textarea>
+      <div class="btn-row"><button id="do-import">読み込む</button></div>
+      <p class="hint" id="import-msg"></p>
+    </div>
+  </div>
+</div>
 
 <!-- プレビュー（投稿画面に似せたダミーの枠。編集はしない） -->
 <div id="preview" class="preview" hidden>
@@ -163,8 +218,11 @@
 <script src="js/loader.js"></script>
 <script src="js/render.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/presets.js"></script>
+<script src="js/styles.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/panels.js"></script>
+<script src="js/stylesui.js"></script>
 <script src="js/textui.js"></script>
 <script src="js/preview.js"></script>
 <script>startApp();</script>
