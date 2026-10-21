@@ -1,0 +1,13 @@
+Copyright (c) 2026 Ykakky. All rights reserved.
+
+このリポジトリのソースコード、デザイン、その他すべての内容の著作権は Ykakky に帰属します。
+著作権者の書面による許可なく、全部または一部を複製・改変・再配布・転載・商用利用することを禁じます。
+閲覧は自由ですが、閲覧できることは利用の許諾を意味しません。
+
+This repository and all of its contents (source code, design, and other materials) are the
+property of Ykakky. No permission is granted to copy, modify, redistribute, republish, or use
+any part of it, commercially or otherwise, without prior written permission from the copyright
+holder. Being able to view this repository does not grant any license to use it.
+
+Note: the web fonts loaded at runtime (Noto Sans JP / Noto Serif JP) are third-party works
+licensed under the SIL Open Font License 1.1 and are not covered by this notice.
