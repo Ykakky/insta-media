@@ -290,7 +290,7 @@ function pruneToneCache(post, photos) {
 }
 
 // ---------- 編集画面用の補助線 ----------
-// view: { frame, selected, grid, handles, ghost, seams }
+// view: { frame, selected, grid, handles, ghost, seams, safe }
 // cssPx: 画面1css pxあたりの台紙px
 
 function drawGuides(ctx, post, view, cssPx) {
@@ -318,6 +318,19 @@ function drawGuides(ctx, post, view, cssPx) {
     for (let x = c.w; x < b.w; x += c.w) { ctx.moveTo(x, 0); ctx.lineTo(x, b.h); }
     for (let y = c.h; y < b.h; y += c.h) { ctx.moveTo(0, y); ctx.lineTo(b.w, y); }
     ctx.stroke();
+  }
+
+  // ストーリーズ：上下のUIに隠れやすい範囲の目安（薄い帯と点線）
+  if (view.safe && (view.safe.safeTop || view.safe.safeBottom)) {
+    const t = view.safe.safeTop || 0, bt = b.h - (view.safe.safeBottom || 0);
+    ctx.fillStyle = 'rgba(255,90,90,0.08)';
+    ctx.fillRect(0, 0, b.w, t);
+    ctx.fillRect(0, bt, b.w, b.h - bt);
+    ctx.strokeStyle = 'rgba(255,90,90,0.6)';
+    ctx.lineWidth = px(1);
+    ctx.setLineDash([px(4), px(4)]);
+    ctx.beginPath(); ctx.moveTo(0, t); ctx.lineTo(b.w, t); ctx.moveTo(0, bt); ctx.lineTo(b.w, bt); ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   // コマの境目（薄い線）

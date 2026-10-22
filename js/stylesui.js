@@ -41,7 +41,7 @@ function renderManageList() {
     for (const st of list.filter(s => s.photoCount === c)) {
       const meta = el('div', { className: 'sm-meta' }, [
         el('div', { className: 'sm-name', textContent: st.name }),
-        el('div', { className: 'sm-sub', textContent: `${st.n}コマ` + (st.preset ? '・初期プリセット' : '') }),
+        el('div', { className: 'sm-sub', textContent: `${aspectById(st.aspect).label}・${st.n}コマ` + (st.preset ? '・初期プリセット' : '') }),
       ]);
       const ex = el('button', { className: 'sub', textContent: '書き出し' });
       ex.addEventListener('click', () => openExport([st], `「${st.name}」`, `style-${safeFileName(st.name)}.json`));

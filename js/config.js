@@ -4,14 +4,24 @@
 // ============================================================
 const CONFIG = {
   // 台紙とグリッド
+  //  FRAME_H・SNAP_COLS・SNAP_ROWS は、選んだ画像の形（ASPECTS）で useAspect() が書き換える
   GRID: {
     FRAME_W: 1080,     // 1コマの幅
-    FRAME_H: 1350,     // 1コマの高さ
-    SNAP_COLS: 16,     // グリッド：1コマを横16×縦20の正方形に（1マス67.5px）
+    FRAME_H: 1350,     // 1コマの高さ（いま選ばれている形のもの）
+    SNAP_COLS: 16,     // グリッドの列数・行数（いま選ばれている形のもの）
     SNAP_ROWS: 20,
     MIN_FRAMES: 1,
     MAX_FRAMES: 10,    // コマ数の上限（複数コマにわたる置き方で足すときも含む）
   },
+
+  // 画像の形。冒頭で選ぶ。グリッドはどちらも正方形になる数にしてある
+  //  safeTop / safeBottom … ストーリーズで上下のUIに隠れやすい範囲（台紙px）。編集画面に目安の線を出す
+  ASPECTS: [
+    { id: 'feed',  label: 'フィード',     ratio: '4:5',  h: 1350, snapCols: 16, snapRows: 20 },  // 1マス67.5px
+    { id: 'story', label: 'ストーリーズ', ratio: '9:16', h: 1920, snapCols: 18, snapRows: 32,   // 1マス60px
+      safeTop: 250, safeBottom: 340 },
+  ],
+  ASPECT_DEFAULT: 'feed',
 
   // 写真の読み込み
   PHOTO: {
@@ -184,6 +194,21 @@ const CONFIG = {
   WHITE: '#ffffff',
   BLACK: '#111111',
 };
+
+// ---------- 画像の形 ----------
+
+function aspectById(id) {
+  return CONFIG.ASPECTS.find(a => a.id === id) || CONFIG.ASPECTS[0];
+}
+
+// 画像の形を切り替える（コマの高さとグリッドが変わる）。投稿は1つずつしか扱わないので、設定を直接書き換える
+function useAspect(id) {
+  const a = aspectById(id);
+  CONFIG.GRID.FRAME_H = a.h;
+  CONFIG.GRID.SNAP_COLS = a.snapCols;
+  CONFIG.GRID.SNAP_ROWS = a.snapRows;
+  return a;
+}
 
 // ---------- 基調色から色を導く ----------
 

@@ -84,6 +84,7 @@ const editor = {
       handles: textTool ? 'lr' : !gw,
       ghost: gw && state.photos[gw.photo] ? { win: gw, photo: state.photos[gw.photo] } : null,
       seams: textTool ? [] : findSeams(state.post),
+      safe: aspectById(state.post.aspect),
     }, this.unitsPerCss());
     if (state.view === 'wide') this.drawMinimap();
   },

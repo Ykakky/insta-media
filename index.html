@@ -27,8 +27,13 @@
 
 <!-- 1. 写真を選んで並べる -->
 <section id="screen-photos" class="screen active">
+  <div class="label">どこに載せる？</div>
+  <div class="seg aspect-seg" id="aspect-seg">
+    <button data-aspect="feed">フィード<small>4:5・1080×1350</small></button>
+    <button data-aspect="story">ストーリーズ<small>9:16・1080×1920</small></button>
+  </div>
   <h1>写真を選んで、並べる</h1>
-  <p class="hint">選んだ順に並びます。ドラッグで入れ替えると、その順がカルーセルの順になります。</p>
+  <p class="hint">選んだ順に並びます。ドラッグで入れ替えると、その順がカルーセルの順になります。「おまかせで組む」で、この順のまま置き方を決めて組み上げます。</p>
   <label class="file-button">
     写真を追加
     <input type="file" id="file-input" accept="image/*" multiple>
@@ -41,7 +46,7 @@
   <button class="link-btn" data-open-styles>スタイルの書き出し・読み込み</button>
   <div class="row sticky-bottom">
     <button id="back-to-edit" class="sub" hidden>編集に戻る</button>
-    <button id="build-btn" disabled>この順で組む</button>
+    <button id="build-btn" disabled>おまかせで組む</button>
   </div>
   <details class="log-box"><summary>読み込みの記録（HEIC・向きの確認用）</summary>
     <div id="load-log" class="log"></div>
@@ -94,6 +99,9 @@
       <div class="btn-row">
         <button id="add-frame" class="sub">後ろにコマ追加</button>
         <button id="del-frame" class="sub">コマを削除</button>
+      </div>
+      <div class="btn-row">
+        <button id="auto-relayout" class="sub">おまかせで組み直す（文字は残す）</button>
       </div>
     </div>
 
@@ -215,6 +223,7 @@
 <!-- プレビュー（投稿画面に似せたダミーの枠。編集はしない） -->
 <div id="preview" class="preview" hidden>
   <div class="pv-card">
+    <div class="pv-bars" id="pv-bars"></div>
     <div class="pv-head">
       <span class="pv-avatar"></span>
       <span class="pv-name">your_account</span>
@@ -238,6 +247,7 @@
 <script src="js/loader.js"></script>
 <script src="js/render.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/autolayout.js"></script>
 <script src="js/presets.js"></script>
 <script src="js/styles.js"></script>
 <script src="js/ui.js"></script>

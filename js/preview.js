@@ -1,5 +1,7 @@
 // ============================================================
-// プレビュー：投稿画面に似せたダミーの枠で、4:5の画像を1枚ずつ見せる
+// プレビュー：投稿画面に似せたダミーの枠で、画像を1枚ずつ見せる
+//  フィード（4:5）：投稿の枠（アカウント名・アイコン・下にドット）
+//  ストーリーズ（9:16）：画面いっぱいの縦長、上に進み具合のバー、名前は画像に重ねる
 // 指で左右にスワイプして切り替える（横スクロール＋スナップ）。編集はしない。
 // コマの境目の線などの補助線は描かない。
 // ============================================================
@@ -7,9 +9,11 @@
 const preview = { urls: [] };
 
 async function openPreview() {
-  const track = $('pv-track'), dots = $('pv-dots');
+  const track = $('pv-track'), dots = $('pv-dots'), bars = $('pv-bars');
   track.innerHTML = '<p class="pv-loading">準備中…</p>';
   dots.innerHTML = '';
+  bars.innerHTML = '';
+  $('preview').classList.toggle('story', state.post.aspect === 'story');
   $('preview').hidden = false;
   await ensureFonts(state.post);
 
@@ -30,7 +34,7 @@ async function openPreview() {
 
   track.innerHTML = '';
   urls.forEach((u, i) => track.appendChild(el('img', { src: u, alt: `${i + 1}枚目`, draggable: false })));
-  urls.forEach(() => dots.appendChild(el('i')));
+  urls.forEach(() => { dots.appendChild(el('i')); bars.appendChild(el('i')); });
   track.scrollLeft = 0;
   updateDots();
 }
@@ -39,6 +43,7 @@ function updateDots() {
   const track = $('pv-track');
   const i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
   [...$('pv-dots').children].forEach((d, k) => d.classList.toggle('on', k === i));
+  [...$('pv-bars').children].forEach((b, k) => b.classList.toggle('on', k <= i)); // ストーリーズは見た分まで埋まる
 }
 
 function closePreviewUrls() {

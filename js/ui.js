@@ -15,6 +15,7 @@ const state = {
   frame: 0,         // 表示中のコマ
   selected: null,   // 選択中の部品（窓・ベタ・文字）。画面上は窓を「写真」と呼ぶ
   poolPick: null,   // プールで持っている写真の番号
+  aspect: CONFIG.ASPECT_DEFAULT, // 画像の形（写真画面の冒頭で選ぶ）：'feed' 4:5 | 'story' 9:16
   exportBlobs: [],
   exportUrls: [],
 };
@@ -55,6 +56,7 @@ function undo() {
   if (!undoLog.stack.length) return;
   const selId = state.selected && state.selected.id;
   state.post = JSON.parse(undoLog.stack.pop());
+  applyAspect(state.post.aspect);
   undoLog.key = null;
   state.selected = state.post.parts.find(p => p.id === selId) || null;
   state.frame = Math.min(state.frame, state.post.n - 1);
@@ -120,7 +122,19 @@ function makeThumb(photo) {
   c.width = c.height = s;
   const k = Math.max(s / photo.w, s / photo.h);
   c.getContext('2d').drawImage(photo.canvas, (s - photo.w * k) / 2, (s - photo.h * k) / 2, photo.w * k, photo.h * k);
+  photo.avg = averageColor(photo.canvas); // おまかせ配置で背景色・基調色を選ぶのに使う
   return c.toDataURL('image/jpeg', 0.8);
+}
+
+// 写真全体の平均色 [r, g, b]
+function averageColor(src) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(src, 0, 0, 16, 16);
+  const d = ctx.getImageData(0, 0, 16, 16).data, sum = [0, 0, 0];
+  for (let i = 0; i < d.length; i += 4) { sum[0] += d[i]; sum[1] += d[i + 1]; sum[2] += d[i + 2]; }
+  return sum.map(v => v / (d.length / 4));
 }
 
 function appendLog(elm, text, isErr) {
@@ -169,14 +183,14 @@ function renderOrderGrid() {
   });
   const n = state.photos.length;
   $('build-btn').disabled = n < 1;
-  $('build-btn').textContent = state.post ? 'この順で組み直す' : 'この順で組む';
+  $('build-btn').textContent = state.post ? 'おまかせで組み直す' : 'おまかせで組む';
   $('back-to-edit').hidden = !state.post || n < 1;
   renderPhotoStyles();
 }
 
 // 写真画面にも、同じ枚数のスタイルを並べる（タップでそのスタイルで組む）
 function renderPhotoStyles() {
-  const n = state.photos.length, list = n ? stylesFor(n) : [];
+  const n = state.photos.length, list = n ? stylesFor(n, state.aspect) : [];
   $('photo-styles-box').hidden = !list.length;
   $('photo-styles-label').textContent = `保存したスタイルで組む（${n}枚用）`;
   renderStyleRow($('photo-styles'), list, false);
@@ -228,10 +242,32 @@ function orderIndexAt(x, y) {
 // 新しい投稿で編集を始める
 function startWithPost(post) {
   state.post = post;
+  applyAspect(post.aspect);
   state.post.parts.forEach(p => p.type === 'window' && state.photos[p.photo] && clampWindow(p, state.photos[p.photo]));
   pruneToneCache(state.post, state.photos);
   Object.assign(state, { frame: 0, tool: 'layout', viewCenter: CONFIG.GRID.FRAME_W / 2 });
   goStep('edit');
+}
+
+// ---------- 画像の形（フィード 4:5 / ストーリーズ 9:16） ----------
+
+// 形の設定を切り替え、画面の表示（サムネイルの比率・選択状態）も合わせる
+function applyAspect(id) {
+  const a = useAspect(id);
+  state.aspect = a.id;
+  document.documentElement.style.setProperty('--frame-ratio', `${CONFIG.GRID.FRAME_W} / ${a.h}`);
+  document.querySelectorAll('#aspect-seg button').forEach(b => b.classList.toggle('on', b.dataset.aspect === a.id));
+}
+
+// 写真画面で形を選ぶ。組んだ後なら、配置を縦方向に比率で伸び縮みさせて引き継ぐ（「戻す」で戻せる）
+function chooseAspect(id) {
+  if (id === state.aspect) return;
+  if (state.post && state.post.aspect !== id) {
+    pushHistory();
+    setPostAspect(state.post, id, state.photos);
+  }
+  applyAspect(id);
+  renderOrderGrid();
 }
 
 function initPhotosScreen() {
@@ -249,15 +285,16 @@ function initPhotosScreen() {
     renderOrderGrid();
   });
 
+  // おまかせで組む：並べた順のまま、置き方・背景色・基調色をおまかせで決める（押すたびに違う組み方になる）
   $('build-btn').addEventListener('click', () => {
-    if (state.post && !confirm('この順で組み直すと、今の配置と文字は消えます。よろしいですか？')) return;
+    if (state.post && !confirm('組み直すと、今の配置と文字は消えます（「戻す」で戻せます）。よろしいですか？')) return;
     pushHistory();
-    const accent = state.post ? state.post.accent : CONFIG.ACCENT_DEFAULT;
-    const post = buildFromPhotos(Math.min(state.photos.length, CONFIG.GRID.MAX_FRAMES));
-    post.accent = accent;
+    applyAspect(state.aspect);
+    const post = autoLayout(state.photos);
     post.parts.forEach(p => fitWindow(p, state.photos));
     startWithPost(post);
   });
+  document.querySelectorAll('#aspect-seg button').forEach(b => b.addEventListener('click', () => chooseAspect(b.dataset.aspect)));
   $('back-to-edit').addEventListener('click', () => goStep('edit'));
 }
 
@@ -461,6 +498,7 @@ function initExportScreen() {
 // ---------- 起動 ----------
 
 function startApp() {
+  applyAspect(state.aspect);
   document.querySelectorAll('#steps [data-step]').forEach(b => b.addEventListener('click', () => goStep(b.dataset.step)));
   $('preview-btn').addEventListener('click', () => { dropEmptyText(); openPreview(); });
   // フォントが届いたら字幅を測り直して描き直す

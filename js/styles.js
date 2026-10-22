@@ -43,9 +43,9 @@ function allStyles() {
   return [...presetStyles(), ...loadStyles().sort((a, b) => b.createdAt - a.createdAt)];
 }
 
-// 写真の枚数が同じスタイルだけ（初期プリセット → 保存したものの新しい順）
-function stylesFor(photoCount) {
-  return allStyles().filter(s => s.photoCount === photoCount);
+// 写真の枚数と画像の形が同じスタイルだけ（初期プリセット → 保存したものの新しい順）
+function stylesFor(photoCount, aspect) {
+  return allStyles().filter(s => s.photoCount === photoCount && s.aspect === aspect);
 }
 
 function addStyle(style) {
@@ -67,6 +67,8 @@ const isHex = v => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
 function sanitizeStyle(s) {
   if (!s || typeof s !== 'object') return null;
   const n = s.n, pc = s.photoCount;
+  // 形の指定が無いもの（ストーリーズ対応より前に保存したもの）はフィード
+  const aspect = CONFIG.ASPECTS.some(a => a.id === s.aspect) ? s.aspect : 'feed';
   if (!Number.isInteger(n) || n < 1 || n > CONFIG.GRID.MAX_FRAMES) return null;
   if (!Number.isInteger(pc) || pc < 1 || pc > CONFIG.PHOTO.MAX_COUNT) return null;
   if (!Array.isArray(s.frameBg) || s.frameBg.length !== n || !s.frameBg.every(isHex)) return null;
@@ -98,7 +100,7 @@ function sanitizeStyle(s) {
     name: (typeof s.name === 'string' && s.name.trim() ? s.name.trim() : '名前なし').slice(0, 60),
     photoCount: pc,
     createdAt: num(s.createdAt) ? s.createdAt : Date.now(),
-    n, accent: CONFIG.ACCENTS.some(a => a.id === s.accent) ? s.accent : CONFIG.ACCENT_DEFAULT,
+    aspect, n, accent: CONFIG.ACCENTS.some(a => a.id === s.accent) ? s.accent : CONFIG.ACCENT_DEFAULT,
     frameBg: [...s.frameBg], windows,
   };
 }
@@ -164,7 +166,7 @@ function importStylesJson(text) {
 // 配置図のサムネイル：コマの背景色の上に、写真を線画の枠で描く（単色系は基調色で塗る）
 function styleThumb(style) {
   const NS = 'http://www.w3.org/2000/svg';
-  const FW = CONFIG.GRID.FRAME_W, FH = CONFIG.GRID.FRAME_H;
+  const FW = CONFIG.GRID.FRAME_W, FH = aspectById(style.aspect).h;
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', `0 0 ${FW * style.n} ${FH}`);
   const add = (tag, attrs) => {

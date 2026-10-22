@@ -65,7 +65,7 @@ function cassetteThumb(key) {
     svg.appendChild(e);
   };
   for (let f = 0; f < c.span; f++) add({ x: f * FW, y: 0, width: FW, height: FH, fill: '#2a2a2a', stroke: '#888', 'stroke-width': 16 });
-  const r = c.rect;
+  const r = { x: c.rect.x * FW, y: c.rect.y * FH, w: c.rect.w * FW, h: c.rect.h * FH }; // 割合 → 台紙px
   if (c.clip) {
     add({ x: r.x, y: r.y, width: r.w, height: r.h, fill: 'none', stroke: '#9cf', 'stroke-width': 14, 'stroke-dasharray': '40 30' });
     const x = Math.max(0, r.x), x2 = Math.min(FW, r.x + r.w);
@@ -299,6 +299,21 @@ function initToolbox() {
     deleteFrame(state.post, state.frame);
     pruneToneCache(state.post, state.photos);
     goFrame(Math.min(state.frame, state.post.n - 1));
+  });
+  // おまかせで組み直す：並べた順のまま置き方・背景色・基調色を決め直す。文字は残す（「戻す」で戻せる）
+  $('auto-relayout').addEventListener('click', () => {
+    pushHistory();
+    const texts = state.post.parts.filter(p => p.type === 'text');
+    const post = autoLayout(state.photos);
+    post.parts.forEach(p => fitWindow(p, state.photos));
+    for (const t of texts) if (t.free.x < post.n * CONFIG.GRID.FRAME_W) post.parts.push(t);
+    state.post = post;
+    state.selected = null;
+    state.frame = Math.min(state.frame, post.n - 1);
+    state.viewCenter = (state.frame + 0.5) * CONFIG.GRID.FRAME_W;
+    pruneToneCache(state.post, state.photos);
+    updateEditorUI();
+    editor.resize();
   });
   $('tone-all').addEventListener('click', applyToneToAll);
   for (const id of ['bg-h', 'bg-s', 'bg-l']) {

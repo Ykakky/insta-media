@@ -102,30 +102,66 @@ function makeText({ x, y, w, text = '' }) {
 // ---------- 投稿 ----------
 
 function createPost(n) {
+  // aspect  … 画像の形（CONFIG.ASPECTS の id）。作ったときに選ばれている形
   // accent  … 基調色（CONFIG.ACCENTS の id）。写真の単色系と文字色に使う
   // frameBg … コマごとの背景色 #rrggbb（基調色とは独立）
-  return { n, accent: CONFIG.ACCENT_DEFAULT, frameBg: Array(n).fill(CONFIG.BG.DEFAULT), parts: [] };
+  return { n, aspect: currentAspectId(), accent: CONFIG.ACCENT_DEFAULT, frameBg: Array(n).fill(CONFIG.BG.DEFAULT), parts: [] };
+}
+
+function currentAspectId() {
+  return (CONFIG.ASPECTS.find(a => a.h === CONFIG.GRID.FRAME_H) || CONFIG.ASPECTS[0]).id;
+}
+
+// 投稿の形を変える。配置は縦方向だけ比率で伸び縮みさせて引き継ぐ（横幅は同じ1080なので変わらない）
+function setPostAspect(post, id, photos) {
+  const from = aspectById(post.aspect).h, to = useAspect(id).h, k = to / from;
+  post.aspect = id;
+  if (k === 1) return;
+  for (const p of post.parts) {
+    const f = p.free;
+    if (p.type === 'text') { f.y = Math.round(f.y * k * 2) / 2; continue; }
+    p.free = { x: f.x, y: Math.round(f.y * k * 2) / 2, w: f.w, h: Math.round(f.h * k * 2) / 2 };
+    if (p.type === 'window' && photos && photos[p.photo]) { p.offsetY *= k; clampWindow(p, photos[p.photo]); }
+  }
 }
 
 // ---------- 置き方（カセット）：写真1枚に対するもの ----------
-// rect はコマの左上を原点にした矩形（台紙px）。span は必要なコマ数。clip はコマの外を切るか。
+// rect はコマの左上を原点にした矩形を、コマの幅・高さに対する割合で持つ（フィードでもストーリーズでも使える）。
+// 実際の位置はグリッド線に揃える（cassetteRect）。span は必要なコマ数。clip はコマの外を切るか。
 
-const FW = CONFIG.GRID.FRAME_W, FH = CONFIG.GRID.FRAME_H;
+const FW = CONFIG.GRID.FRAME_W;
+const frameH = () => CONFIG.GRID.FRAME_H;   // 選んだ形で変わる
 const CASSETTES = {
-  full:        { label: '1コマ全面',     span: 1, rect: { x: 0, y: 0, w: FW, h: FH } },
-  span2:       { label: '2コマにわたる', span: 2, rect: { x: 0, y: 0, w: FW * 2, h: FH } },
-  span3:       { label: '3コマにわたる', span: 3, rect: { x: 0, y: 0, w: FW * 3, h: FH } },
-  top:         { label: '上半分',   span: 1, rect: { x: 0, y: 0, w: FW, h: FH / 2 } },
-  bottom:      { label: '下半分',   span: 1, rect: { x: 0, y: FH / 2, w: FW, h: FH / 2 } },
-  left:        { label: '左半分',   span: 1, rect: { x: 0, y: 0, w: FW / 2, h: FH } },
-  right:       { label: '右半分',   span: 1, rect: { x: FW / 2, y: 0, w: FW / 2, h: FH } },
-  smallCenter: { label: '小・中央', span: 1, rect: { x: 270, y: 337.5, w: 540, h: 675 } },
-  smallTL:     { label: '小・左上', span: 1, rect: { x: 67.5, y: 67.5, w: 472.5, h: 607.5 } },
-  smallBL:     { label: '小・左下', span: 1, rect: { x: 67.5, y: 675, w: 472.5, h: 607.5 } },
-  smallBR:     { label: '小・右下', span: 1, rect: { x: 540, y: 675, w: 472.5, h: 607.5 } },
-  bleedLeft:   { label: '左に切れる', span: 1, clip: true, rect: { x: -337.5, y: 135, w: 945, h: 1080 } },
-  bleedRight:  { label: '右に切れる', span: 1, clip: true, rect: { x: 472.5, y: 135, w: 945, h: 1080 } },
+  full:        { label: '1コマ全面',     span: 1, rect: { x: 0, y: 0, w: 1, h: 1 } },
+  span2:       { label: '2コマにわたる', span: 2, rect: { x: 0, y: 0, w: 2, h: 1 } },
+  span3:       { label: '3コマにわたる', span: 3, rect: { x: 0, y: 0, w: 3, h: 1 } },
+  top:         { label: '上半分',   span: 1, rect: { x: 0, y: 0, w: 1, h: 1 / 2 } },
+  bottom:      { label: '下半分',   span: 1, rect: { x: 0, y: 1 / 2, w: 1, h: 1 / 2 } },
+  left:        { label: '左半分',   span: 1, rect: { x: 0, y: 0, w: 1 / 2, h: 1 } },
+  right:       { label: '右半分',   span: 1, rect: { x: 1 / 2, y: 0, w: 1 / 2, h: 1 } },
+  smallCenter: { label: '小・中央', span: 1, rect: { x: 1 / 4, y: 1 / 4, w: 1 / 2, h: 1 / 2 } },
+  smallTL:     { label: '小・左上', span: 1, rect: { x: 1 / 16, y: 1 / 20, w: 7 / 16, h: 9 / 20 } },
+  smallBL:     { label: '小・左下', span: 1, rect: { x: 1 / 16, y: 1 / 2, w: 7 / 16, h: 9 / 20 } },
+  smallBR:     { label: '小・右下', span: 1, rect: { x: 1 / 2, y: 1 / 2, w: 7 / 16, h: 9 / 20 } },
+  bleedLeft:   { label: '左に切れる', span: 1, clip: true, rect: { x: -5 / 16, y: 1 / 10, w: 7 / 8, h: 4 / 5 } },
+  bleedRight:  { label: '右に切れる', span: 1, clip: true, rect: { x: 7 / 16, y: 1 / 10, w: 7 / 8, h: 4 / 5 } },
 };
+
+// 割合で書いた矩形を、コマ f の中の実際の位置（台紙px）にする。各辺は近いグリッド線に揃える
+function fracRect(f, r) {
+  return snapRectToGrid({ x: f * FW + r.x * FW, y: r.y * frameH(), w: r.w * FW, h: r.h * frameH() });
+}
+
+function cassetteRect(key, f) {
+  return fracRect(f, CASSETTES[key].rect);
+}
+
+function snapRectToGrid(r) {
+  const c = gridCell();
+  const sx = v => Math.round(v / c.w) * c.w, sy = v => Math.round(v / c.h) * c.h;
+  const x = sx(r.x), y = sy(r.y);
+  return { x, y, w: Math.max(c.w, sx(r.x + r.w) - x), h: Math.max(c.h, sy(r.y + r.h) - y) };
+}
 
 // 写真 win をコマ f に置き方 key で置く。他の写真の中身（写真・寄せ・色調）は変えない。
 //  ・1コマの置き方：その写真の枠を決めるだけ
@@ -137,15 +173,14 @@ function applyCassette(post, win, f, key, photos) {
   if (c.span > 1) {
     // 継ぎ目を動かした後などで、写真がこのコマの途中から始まっていれば左端はそのまま。右へ伸ばす
     const r0 = partRect(win), fl = f * FW;
-    const midStart = r0.y === 0 && r0.h === FH && r0.x > fl && r0.x < fl + FW - CONFIG.EDIT.MIN_KEEP_W;
+    const midStart = r0.y === 0 && r0.h === frameH() && r0.x > fl && r0.x < fl + FW - CONFIG.EDIT.MIN_KEEP_W;
     const left = midStart ? r0.x : fl;
-    win.free = { x: left, y: 0, w: (f + c.span) * FW - left, h: FH };
+    win.free = { x: left, y: 0, w: (f + c.span) * FW - left, h: frameH() };
     win.cassette = key;
     win.clip = false;
     makeRoom(post, win, photos || []);
   } else {
-    const r = c.rect;
-    win.free = { x: f * FW + r.x, y: r.y, w: r.w, h: r.h };
+    win.free = cassetteRect(key, f);
     win.cassette = key;
     win.clip = !!c.clip;
   }
@@ -285,7 +320,7 @@ function deleteFrame(post, f) {
 function postToStyle(post, photoCount, name) {
   return {
     v: 1, name, photoCount, createdAt: Date.now(),
-    n: post.n, accent: post.accent, frameBg: [...post.frameBg],
+    aspect: post.aspect, n: post.n, accent: post.accent, frameBg: [...post.frameBg],
     windows: post.parts.filter(p => p.type === 'window').map(p => ({
       photo: p.photo, free: { ...p.free }, cassette: p.cassette, clip: p.clip, border: p.border,
       zoom: p.zoom, offsetX: p.offsetX, offsetY: p.offsetY, tone: { ...p.tone },
@@ -296,6 +331,7 @@ function postToStyle(post, photoCount, name) {
 // スタイルから投稿を作る。写真は番号どおり（＝今の並び順）に割り当てる。
 // keepTexts … 今の投稿の文字を引き継ぐ（コマ数を超える分は捨てる）
 function postFromStyle(style, keepTexts) {
+  useAspect(style.aspect);
   const post = createPost(style.n);
   post.accent = style.accent;
   post.frameBg = [...style.frameBg];

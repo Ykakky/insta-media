@@ -14,7 +14,10 @@ function addTextButton() {
   const T = CONFIG.TYPE, fr = frameRect(state.frame);
   const w = Math.round(fr.w * T.defaultWidth);
   pushHistory();
-  const t = makeText({ x: fr.x + Math.round((fr.w - w) / 2), y: Math.round(fr.h * 0.1), w });
+  // ストーリーズでは、上のUIに隠れやすい範囲より下に置く
+  const safeTop = aspectById(state.post.aspect).safeTop || 0;
+  const y = Math.max(Math.round(fr.h * 0.1), safeTop ? safeTop + gridCell().h : 0);
+  const t = makeText({ x: fr.x + Math.round((fr.w - w) / 2), y, w });
   state.post.parts.push(t);
   select(t);
   $('text-input').focus();
